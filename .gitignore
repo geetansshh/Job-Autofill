@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+/autofill/
+.env
+.env.* 
+*.log
+
+# Playwright / artifacts
+playwright-report/
+test-results/
+trace.zip
+/screenshots/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

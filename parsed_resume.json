@@ -1,0 +1,116 @@
+{
+  "name": "Geetansh Yadav",
+  "emails": [
+    "yadavgeetansh007@gmail.com"
+  ],
+  "phones": [
+    "+91-9024418965"
+  ],
+  "linkedin_url": "https://linkedin.com/in/Geetansh",
+  "github_url": "https://github.com/geetansshh",
+  "education": [
+    {
+      "institution": "Indian Institute of Information Technology, Nagpur",
+      "degree": "B.Tech",
+      "field_of_study": "Computer Science and Engineering",
+      "start_date": "2022-08",
+      "end_date": "Present",
+      "grade": "8.73"
+    },
+    {
+      "institution": "Central Board of Secondary Education (CBSE)",
+      "degree": "Senior Secondary",
+      "grade": "94.6%",
+      "end_date": "2021"
+    },
+    {
+      "institution": "Central Board of Secondary Education (CBSE)",
+      "degree": "Secondary",
+      "grade": "94%",
+      "end_date": "2019"
+    }
+  ],
+  "experience": [
+    {
+      "company": "SMS Datatech",
+      "title": "Software Engineering Intern",
+      "start_date": "2025-07",
+      "end_date": "Present",
+      "location": "Tokyo, Japan",
+      "highlights": [
+        "Design and implement an AI-assisted web scraping platform in Python using , Crawl4AI, and Firecrawl to extract structured data at scale.",
+        "Extend the framework for domain-specific use cases (e-commerce, GovTech) with reusable spiders, schema normalization, and modular pipelines.",
+        "Migrate legacy scrapers into a unified Scrapy codebase to reduce duplication and complexity, improving maintainability and debuggability.",
+        "Optimize large-scale ETL/data pipelines for reliability and performance; improved crawl throughput and downstream ingestion stability.",
+        "Harden the system for high-traffic sources through better error handling, configuration management, and testing.",
+        "Use GraphQL APIs to pull structured JSON directly from backends—replacing brittle HTML/CSS selector scraping; implement pagination, query batching, and auth to boost stability, throughput, and maintainability."
+      ]
+    },
+    {
+      "company": "Mphasis",
+      "title": "Software Engineering Intern",
+      "start_date": "2024-06",
+      "end_date": "2024-08",
+      "location": "Noida, India",
+      "highlights": [
+        "Built and optimized user interfaces for an interview management application.",
+        "Prototyped an AI-driven resume shortlisting bot, improving candidate screening efficiency."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "Fake News Detection Using NLP",
+      "description": "Developed an NLP-based fake-news detection system for near real-time classification of deceptive content; implemented training/inference pipelines in Python. Evaluated multiple machine learning approaches to improve accuracy and adaptability to evolving misinformation patterns. Applied continuous learning strategies to maintain model effectiveness over time.",
+      "technologies": [
+        "Python",
+        "NLP",
+        "Machine Learning"
+      ]
+    },
+    {
+      "name": "Chikitsa: Medical Chatbot & Appointment Booking",
+      "link": "GitHub",
+      "description": "Built a chatbot to handle medical queries and basic triage, returning concise health information. Implemented interaction history (7-day retention) so users can review previous conversations. Designed a booking workflow to schedule appointments directly via the chatbot interface.",
+      "technologies": []
+    }
+  ],
+  "skills": [
+    "Python",
+    "Scrapy",
+    "Crawl4AI",
+    "Firecrawl",
+    "Web Scraping",
+    "ETL",
+    "Data Pipelines",
+    "Scalability",
+    "Code Quality",
+    "NLP",
+    "API Integration",
+    "Debugging",
+    "Maintainability",
+    "Code Optimization",
+    "C",
+    "C++",
+    "SQL",
+    "HTML",
+    "CSS",
+    "JavaScript",
+    "TypeScript",
+    "Flask",
+    "React",
+    "TensorFlow",
+    "Keras",
+    "PyTorch",
+    "OpenCV",
+    "Seaborn",
+    "GraphQL"
+  ],
+  "leetcode_url": "https://leetcode.com/Geetansh",
+  "codechef_url": "https://www.codechef.com/users/Geetansh007",
+  "location": "Nagpur, India",
+  "volunteering": [
+    "Founder, Pahal — community initiative supporting underprivileged students.",
+    "Core Team Member, Udyam (Entrepreneurship Cell, IIIT Nagpur) — Event Management Lead."
+  ]
+}
