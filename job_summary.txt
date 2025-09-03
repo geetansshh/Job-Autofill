@@ -1,0 +1,13 @@
+SUMMARY:
+
+ABOUT THE COMPANY:
+- Global technology and management consulting firm.
+- Supports 100+ clients in banking, financial, and energy sectors.
+- Recognized for deep transformation execution and delivery.
+
+ROLE SUMMARY:
+- Automation Framework Developer role in Bangalore.
+- 4+ years of experience in Software Testing, with 3+ years in Test Automation.
+- Proficiency in Java, BDD Cucumber, RestAssured, Selenium Webdriver, and API testing tools (Postman, SoapUI, RestAssured).
+- Experience with Web Services protocols (RESTful/SOAP), test management tools (JIRA/Zephyr/Confluence), and databases (Postgres, Oracle, DB2).
+- Knowledge of modern testing practices, Scaled Agile methodologies, and DevOps.

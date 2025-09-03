@@ -1,0 +1,150 @@
+{
+  "first_name": {
+    "question": "First Name*",
+    "answer": "Geetansh"
+  },
+  "last_name": {
+    "question": "Last Name*",
+    "answer": "Yadav"
+  },
+  "email": {
+    "question": "Email*",
+    "answer": "yadavgeetansh007@gmail.com"
+  },
+  "phone": {
+    "question": "Phone*",
+    "answer": "+91-9024418965"
+  },
+  "candidate-location": {
+    "question": "Location (City)*",
+    "answer": "Nagpur"
+  },
+  "question_57066913": {
+    "question": "How many years of experience do you have in overall?*",
+    "answer": "0-4yrs"
+  },
+  "question_57066914": {
+    "question": "How many years of experience you have in Automation Testing?*",
+    "answer": "NO"
+  },
+  "question_57066915": {
+    "question": "Do you have experience in Java Programming/ Automation Framework Development?*",
+    "answer": "No"
+  },
+  "question_57066916": {
+    "question": "How many years of experience you have in Java programming?*",
+    "answer": "0-2yrs"
+  },
+  "question_57066917": {
+    "question": "How many years of experience you have in API Automation?*",
+    "answer": "NO"
+  },
+  "question_57066918": {
+    "question": "How many years of experience you have in Agile?*",
+    "answer": "NO"
+  },
+  "question_57066919": {
+    "question": "Are you currently working?*",
+    "answer": "Yes"
+  },
+  "question_57066927": {
+    "question": "LinkedIn Profile Link*",
+    "answer": "https://linkedin.com/in/geetansgh-yadav"
+  },
+  "question_59658513": {
+    "question": "(question text not found in form)",
+    "answer": "Fresher"
+  },
+  "question_59658514": {
+    "question": "(question text not found in form)",
+    "answer": "Yes"
+  },
+  "question_59658515": {
+    "question": "(question text not found in form)",
+    "answer": "Python, Scrapy, Crawl4AI, Firecrawl, C, C++, SQL, HTML, CSS, JavaScript, TypeScript, Flask, React, TensorFlow, Keras, PyTorch, OpenCV, Seaborn, GraphQL"
+  },
+  "question_59658516": {
+    "question": "(question text not found in form)",
+    "answer": "Yes"
+  },
+  "question_59658517": {
+    "question": "(question text not found in form)",
+    "answer": "No"
+  },
+  "question_59658524": {
+    "question": "(question text not found in form)",
+    "answer": "2024"
+  },
+  "question_59658518": {
+    "question": "(question text not found in form)",
+    "answer": "Yes"
+  },
+  "question_59658519": {
+    "question": "(question text not found in form)",
+    "answer": "Yes"
+  },
+  "question_59658520": {
+    "question": "(question text not found in form)",
+    "answer": "Yes"
+  },
+  "question_59658522": {
+    "question": "(question text not found in form)",
+    "answer": "Bangalore"
+  },
+  "question_59658523": {
+    "question": "(question text not found in form)",
+    "answer": "Immediate"
+  },
+  "question_59658525": {
+    "question": "(question text not found in form)",
+    "answer": "3lpa"
+  },
+  "question_59658526": {
+    "question": "(question text not found in form)",
+    "answer": "12lpa"
+  },
+  "question_59658527": {
+    "question": "(question text not found in form)",
+    "answer": "NA"
+  },
+  "question_59658528": {
+    "question": "(question text not found in form)",
+    "answer": "Male"
+  },
+  "question_59658521": {
+    "question": "(question text not found in form)",
+    "answer": "Tokyo"
+  },
+  "question_57066921": {
+    "question": "What is your official notice period? If you are serving notice, please mention official last working day.*",
+    "answer": "NA"
+  },
+  "question_57066922": {
+    "question": "How soon you can join us?*",
+    "answer": "Immediate"
+  },
+  "question_57066923": {
+    "question": "What is the reason for job change?*",
+    "answer": "Internship Got over"
+  },
+  "question_57066925": {
+    "question": "What is your preferred location?*",
+    "answer": "Bangalore"
+  },
+  "question_57066926": {
+    "question": "What is your Current CTC and Expected CTC?*",
+    "answer": "3lpa and 12lpa"
+  },
+  "question_59439310": {
+    "question": "Capco Job Candidate Privacy Notice Acknowledgement*",
+    "answer": "Acknowledge"
+  },
+  "question_57066920": {
+    "question": "What is you current or last payroll company name?*",
+    "answer": "sms datatech"
+  },
+  "question_57066924": {
+    "question": "What is your current location?*",
+    "answer": "Tokyo"
+  }
+}

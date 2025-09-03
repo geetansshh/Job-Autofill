@@ -1,0 +1,11 @@
+COVER LETTER:
+Dear Bangalore Hiring Team,
+
+I’m excited to apply for this role. My background includes hands-on experience with java, api, which has helped improve automation reliability, speed up feedback cycles, and strengthen release quality.
+
+In prior projects I built and maintained automated test suites, collaborated closely with engineering and product to clarify acceptance criteria, and used CI/CD telemetry to focus testing where it mattered most. I enjoy translating requirements into robust, maintainable tests and thrive in agile, cross-functional teams.
+
+I’d welcome the chance to discuss how I can contribute to your roadmap. Thank you for your time and consideration.
+
+Best regards,
+Geetansh

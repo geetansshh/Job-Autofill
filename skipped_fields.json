@@ -1,0 +1,62 @@
+[
+  {
+    "id": "question_57066921",
+    "question": "What is your official notice period? If you are serving notice, please mention official last working day.*",
+    "reason": "Information not present in the resume."
+  },
+  {
+    "id": "question_57066922",
+    "question": "How soon you can join us?*",
+    "reason": "Information not present in the resume."
+  },
+  {
+    "id": "question_57066923",
+    "question": "What is the reason for job change?*",
+    "reason": "Information not present in the resume."
+  },
+  {
+    "id": "question_57066925",
+    "question": "What is your preferred location?*",
+    "reason": "Information not present in the resume."
+  },
+  {
+    "id": "question_57066926",
+    "question": "What is your Current CTC and Expected CTC?*",
+    "reason": "Information not present in the resume."
+  },
+  {
+    "id": "question_59439310",
+    "question": "Capco Job Candidate Privacy Notice Acknowledgement*",
+    "reason": "Information not present in the resume."
+  },
+  {
+    "id": "question_57066920",
+    "question": "What is you current or last payroll company name?*",
+    "reason": "personal/preference"
+  },
+  {
+    "id": "question_57066921",
+    "question": "What is your official notice period? If you are serving notice, please mention official last working day.*",
+    "reason": "personal/preference"
+  },
+  {
+    "id": "question_57066924",
+    "question": "What is your current location?*",
+    "reason": "personal/preference"
+  },
+  {
+    "id": "question_57066925",
+    "question": "What is your preferred location?*",
+    "reason": "personal/preference"
+  },
+  {
+    "id": "question_57066926",
+    "question": "What is your Current CTC and Expected CTC?*",
+    "reason": "personal/preference"
+  },
+  {
+    "id": "question_59439310",
+    "question": "Capco Job Candidate Privacy Notice Acknowledgement*",
+    "reason": "personal/preference"
+  }
+]
