@@ -1,12 +1,12 @@
-# i have these form fileds and i want to answer the questions in this form using my parsed resume file there can be three type of questions fitrst , the question that can be answered directly from resume like first name ,last name etc another can be questions that can be indirectly answered from resume for example do you know selenium? so if by reading the rseume you feel that no experince of selenium another tyoe can be perosnal questiosn that can be answered directly or indirectly using resume for example are you ok with wfh, are you ok wiht 2 year bond , what is your current ctc, what is your expected ctc stc now these can questions can subtype into 2 diffrent categories the first the one without options then the llm can answer freely according to my resume and teh questiosn type , the other type can be the one which has options so the llm has to choose the closes option according to its knowledge of my resume the llm has to skip perosnal questions orany questiosn that coudnt be answered so give me a simple script for that i am using a gemini api key
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Generalized resume→form filler using Gemini (no argparse, hard-coded paths).
 - Works with any form schema (normalizes common field shapes).
 - Accepts resume as JSON (any structure) or plain text.
-- Strong system prompt enforces: fill only from resume, choose only provided options,
-  answer skill questions Yes/No (not Skip), and skip personal/preference fields.
+- Strong system prompt enforces: fill only from resume + supplemental context,
+  choose only provided options, answer skill questions Yes/No (not Skip),
+  and skip personal/preference fields.
 - Local post-check also skips personal/preference questions for extra safety.
 - Writes: filled_answers.json, skipped_fields.json
 
@@ -27,41 +27,57 @@ from typing import Any, Dict, List, Optional, Tuple
 # ========================= HARD-CODED CONFIG =========================
 FORM_PATH = "form_fields.json"          # <-- change this if needed
 RESUME_PATH = "parsed_resume.json"      # or a .txt resume
-MODEL_NAME = "gemini-2.5-flash-lite"         # or "gemini-1.5-pro"
+MODEL_NAME = "gemini-2.5-flash-lite"    # or "gemini-1.5-pro"
 ANSWERS_OUT = "filled_answers.json"
 SKIPPED_OUT = "skipped_fields.json"
 DRY_RUN = False                         # True -> preview prompt payload only, no API call
+
+# ---- NEW: supplemental context (hard-code either a path, or inline text) ----
+EXTRA_CONTEXT_PATH = "Supplemental_context.json"               # e.g., "supplemental_context.json" or "supplemental.txt"
+EXTRA_CONTEXT_TEXT = None
+# """
+# # - Candidate status: Currently a student seeking an internship.
+# # - Availability to start: Immediate (0 days’ notice).
+# # - Work authorization: Authorized to work in India; have a valid work permit; no employer sponsorship required.
+# # - Location preference (priority): Bangalore.
+# # - Relocation: Open to relocate.
+# # """.strip()
 # ====================================================================
 
 # ---------------------------- Prompt (POWERFUL & GENERAL) ----------------------------
 
 SYSTEM_INSTRUCTION = """
-You are an expert ATS agent filling job application forms from a single source of truth: the candidate’s resume.
+You are an expert ATS agent filling job application forms from two sources of truth:
+(1) the candidate’s RESUME, and (2) the provided SUPPLEMENTAL CONTEXT.
+
+SOURCE PRIORITY
+- When the resume and the supplemental context disagree, prefer the RESUME.
+- Otherwise, you may use either source. Do NOT invent facts.
 
 CORE MISSION
-Fill each field ONLY with information grounded in the resume. If a field is personal/preference (e.g., CTC, expected salary, current salary, package, negotiable, notice period, last working day, joining time, buyout, WFH/WFO/Hybrid, shifts, relocation/preferred location, travel willingness, gender, age, DOB, marital status, bonds/service agreements, NDA/non-compete, visa status unless stated), SKIP it. If the information is not present in the resume, SKIP it.
+Fill each field ONLY with information grounded in the resume or the supplemental context. If a field is personal/preference (e.g., CTC, expected salary, current salary, package, negotiable, notice period, last working day, joining time, buyout, WFH/WFO/Hybrid, shifts, relocation/preferred location, travel willingness, gender, age, DOB, marital status, bonds/service agreements, NDA/non-compete, visa status unless stated), SKIP it. If the information is not present in either source, SKIP it.
 
 IMPORTANT RULES
 1) Evidence policy:
-   - “YES” for a skill/tech/tool only when the resume explicitly shows experience, proficiency, coursework, projects, or achievements with that item (or clear synonyms).
-   - “NO” for a skill/tech/tool when the resume contains no evidence at all. Do NOT answer “Skip” in that case unless the question is ambiguous or not about skills/experience.
+   - “YES” for a skill/tech/tool only when the resume or the supplemental context explicitly shows experience, proficiency, coursework, projects, or achievements with that item (or clear synonyms).
+   - “NO” for a skill/tech/tool when neither source contains evidence at all. Do NOT answer “Skip” in that case unless the question is ambiguous or not about skills/experience.
    - Never invent dates, salaries, IDs, or options.
-   - If the resume has partial/conflicting info, SKIP unless the field’s options clearly contain a best-fit label.
+   - If the sources have partial/conflicting info, SKIP unless the field’s options clearly contain a best-fit label (and it is consistent with source priority).
 
 2) Options policy:
    - If a field has options, choose ONLY from the provided option labels (verbatim).
    - For Yes/No options, follow the evidence policy above.
-   - For ranges/buckets (e.g., years of experience), pick the closest matching label based on the resume’s content. If unclear, SKIP.
+   - For ranges/buckets (e.g., years of experience), pick the closest matching label based on the sources. If unclear, SKIP.
    - For multi-select fields: return a list with zero or more labels (labels MUST come from the provided options).
 
-3) Personal/Preference questions (ALWAYS SKIP unless explicitly stated in resume):
+3) Personal/Preference questions (ALWAYS SKIP unless explicitly stated in the resume or supplemental context):
    - Compensation (CTC, current/expected salary, package, negotiable)
    - Notice period, last working day, joining time, buyout
    - Work mode (WFH, WFO, Hybrid), shifts, relocation preference, preferred location, travel willingness
    - Gender, age, DOB, marital status
    - Bonds/service agreements/clauses, NDA/non-compete
-   - Visa/immigration status unless clearly present in resume
-   - Any other preference not clearly stated in the resume
+   - Visa/immigration status unless clearly present in sources
+   - Any other preference not clearly stated in the sources
 
 4) Output format:
    - Return ONLY valid JSON with this exact structure:
@@ -73,14 +89,14 @@ IMPORTANT RULES
 
 5) Safety/grounding:
    - If a value can be derived but requires standard formatting (e.g., first/last name, city from “City, State”), provide a clean, concise value.
-   - If a field is a free-text question, answer concisely using resume facts only.
+   - If a field is a free-text question, answer concisely using only facts from the sources.
    - Never include your reasoning in the output. Output JSON only.
 
 INTERPRETATION NOTES
 - Treat synonyms/near matches sensibly (e.g., “JS”→“JavaScript”, “Py”→“Python”). “Web automation” does NOT imply “Selenium” unless Selenium is explicitly present.
-- If a field asks “Do you know <X>?” and <X> is not in the resume, answer “No” (not “Skip”).
-- If a field asks for graduation year and the resume clearly lists it, return the year (or pick the correct option).
-- If nothing in the resume supports a definite answer and the question is not a knowledge/skill presence check, SKIP.
+- If a field asks “Do you know <X>?” and <X> is not in the sources, answer “No” (not “Skip”).
+- If a field asks for graduation year and the sources clearly list it, return the year (or pick the correct option).
+- If nothing in the sources supports a definite answer and the question is not a knowledge/skill presence check, SKIP.
 
 Return JSON only.
 """
@@ -127,6 +143,25 @@ def read_resume_any(path: str) -> Tuple[str, Optional[Dict[str, Any]]]:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             text = f.read()
         return text, None
+
+def read_context_any(path: Optional[str], inline_text: Optional[str]) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """
+    Returns (context_text, context_json_if_any) from either a path or inline text.
+    - If path points to JSON: flatten like resume.
+    - If path points to text: read raw.
+    - If no path, use inline_text (or empty string).
+    """
+    if path:
+        try:
+            data = load_json(path)
+            return flatten_resume_json(data), data
+        except Exception:
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    return f.read(), None
+            except Exception:
+                pass
+    return (inline_text or "").strip(), None
 
 def flatten_resume_json(d: Dict[str, Any]) -> str:
     """Make a readable text dump from a parsed resume JSON of arbitrary shape."""
@@ -249,20 +284,24 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
         raise ValueError("No valid fields with id and question found.")
     return out
 
-def extract_simple_facts(resume_text: str) -> Dict[str, Any]:
+def extract_simple_facts(source_text: str) -> Dict[str, Any]:
     """
-    Lightweight extraction to help the model (model must still rely on resume_text).
+    Lightweight extraction to help the model (model must still rely on source text).
     """
-    email = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", resume_text)
-    phone = re.search(r"(\+?\d[\d\-\s()]{7,}\d)", resume_text)
-    name_line = resume_text.splitlines()[0] if resume_text.splitlines() else ""
+    email = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", source_text)
+    phone = re.search(r"(\+?\d[\d\-\s()]{7,}\d)", source_text)
+    name_line = source_text.splitlines()[0] if source_text.splitlines() else ""
     return {
         "possible_email": email.group(0) if email else None,
         "possible_phone": phone.group(0) if phone else None,
         "first_line_maybe_name": name_line.strip()[:120] if name_line else None,
     }
 
-def build_model_payload(fields: List[NormalizedField], resume_text: str, facts: Dict[str, Any]) -> Dict[str, Any]:
+def build_model_payload(fields: List[NormalizedField],
+                        resume_text: str,
+                        facts_resume: Dict[str, Any],
+                        context_text: str,
+                        facts_context: Dict[str, Any]) -> Dict[str, Any]:
     norm_fields = []
     for f in fields:
         norm_fields.append({
@@ -274,7 +313,9 @@ def build_model_payload(fields: List[NormalizedField], resume_text: str, facts: 
         })
     return {
         "resume_text": resume_text,
-        "pre_extracted_facts": facts,
+        "pre_extracted_facts": facts_resume,
+        "supplemental_context_text": context_text,
+        "supplemental_context_facts": facts_context,
         "fields": norm_fields,
     }
 
@@ -295,7 +336,7 @@ def call_gemini(prompt_payload: Dict[str, Any], model_name: str) -> Dict[str, An
         },
     )
     user_msg = (
-        "Fill the form using ONLY the resume below. Return JSON only.\n"
+        "Fill the form using ONLY the RESUME and the SUPPLEMENTAL CONTEXT below. Return JSON only.\n"
         + json.dumps(prompt_payload, ensure_ascii=False)
     )
     resp = model.generate_content(user_msg)
@@ -352,7 +393,7 @@ def validate_and_clip(fields: List[NormalizedField], model_out: Dict[str, Any]) 
         if f.id not in out_answers:
             # if model didn't answer, keep skipped (unless already present)
             if not any(s.get("id") == f.id for s in skipped):
-                skipped.append({"id": f.id, "question": f.question, "reason": "not in resume / ambiguous"})
+                skipped.append({"id": f.id, "question": f.question, "reason": "not in sources / ambiguous"})
             continue
 
         val = out_answers.get(f.id)
@@ -399,9 +440,15 @@ def main():
     # Load inputs
     form = load_json(FORM_PATH)
     fields = normalize_fields(form)
+
     resume_text, _resume_json = read_resume_any(RESUME_PATH)
-    facts = extract_simple_facts(resume_text)
-    payload = build_model_payload(fields, resume_text, facts)
+    facts_resume = extract_simple_facts(resume_text)
+
+    # NEW: read supplemental context (from path if provided, else inline)
+    context_text, _context_json = read_context_any(EXTRA_CONTEXT_PATH, EXTRA_CONTEXT_TEXT)
+    facts_context = extract_simple_facts(context_text) if context_text else {}
+
+    payload = build_model_payload(fields, resume_text, facts_resume, context_text, facts_context)
 
     if DRY_RUN:
         print("=== SYSTEM INSTRUCTION ===")
