@@ -12,16 +12,17 @@
 from __future__ import annotations
 import asyncio, os, re, textwrap
 from pathlib import Path
+from output_config import OutputPaths
 
 # ===================== EDIT THESE =====================
-JOB_URL        = "https://job-boards.greenhouse.io/capco/jobs/6924131"     # <-- your job URL
+JOB_URL        = "https://job-boards.greenhouse.io/gomotive/jobs/8137073002?gh_src=my.greenhouse.search"     # <-- your job URL
 RESUME_PATH    = "./data/resume.pdf"               # prefers .txt; falls back to .pdf
 CANDIDATE_NAME = "Geetansh"                        # <-- your name (or None)
 EXTRAS         = None                             # <-- extra instructions for cover letter (or None)
 SUMMARY_ROLE_BULLETS  = 5   # bullets under ROLE SUMMARY
 SUMMARY_ABOUT_BULLETS = 3   # bullets under ABOUT THE COMPANY
 WORD_TARGET    = 160        # cover letter ~140–180 words
-OUTDIR         = "."
+# OUTDIR removed - now using centralized output paths
 # ======================================================
 
 # (optional) load .env for GEMINI_API_KEY
@@ -263,8 +264,7 @@ def generate(job_url: str,
     job_md = crawl_markdown(job_url)
 
     # Save the raw job page markdown
-    outdir = Path(OUTDIR); outdir.mkdir(parents=True, exist_ok=True)
-    (outdir / "job_page.md").write_text(job_md, encoding="utf-8")
+    OutputPaths.JOB_PAGE_MD.write_text(job_md, encoding="utf-8")
 
     # Light detection for nicer prompts
     detected_title, detected_company = guess_title_company_from_markdown(job_md)
@@ -315,14 +315,13 @@ def main():
         word_target=WORD_TARGET,
     )
 
-    outdir = Path(OUTDIR)
-    (outdir / "job_summary.txt").write_text(summary, encoding="utf-8")
-    (outdir / "cover_letter.txt").write_text(cover, encoding="utf-8")
+    OutputPaths.JOB_SUMMARY.write_text(summary, encoding="utf-8")
+    OutputPaths.COVER_LETTER.write_text(cover, encoding="utf-8")
 
     print("\nSaved files:")
-    print(f" - {outdir / 'job_page.md'}       (raw job Markdown)")
-    print(f" - {outdir / 'job_summary.txt'}   (job-focused summary)")
-    print(f" - {outdir / 'cover_letter.txt'}  (tailored cover letter)")
+    print(f" - {OutputPaths.JOB_PAGE_MD}       (raw job Markdown)")
+    print(f" - {OutputPaths.JOB_SUMMARY}   (job-focused summary)")
+    print(f" - {OutputPaths.COVER_LETTER}  (tailored cover letter)")
 
     print("\n=== SUMMARY (job-focused) ===\n")
     print(summary)

@@ -12,11 +12,12 @@ import json
 import os
 import pdfplumber
 from dotenv import load_dotenv
+from output_config import OutputPaths
 
 # ---- edit this to your actual file ----
 RESUME_PDF = "./data/resume.pdf"
-OUT_PATH   = "./parsed_resume.json"
-MODEL_NAME = "gemini-1.5-flash"
+OUT_PATH   = OutputPaths.PARSED_RESUME  # Now using centralized output path
+MODEL_NAME = "gemini-2.5-flash-lite"
 # ---------------------------------------
 
 def read_pdf_text(path: str) -> str:
@@ -55,7 +56,7 @@ def build_prompt(resume_text: str) -> str:
 def main():
     # 1) load key
     load_dotenv()
-    api_key = os.getenv("GEMINI_API_KEY", "")
+    api_key ="AIzaSyAJrmvM10sV7GxgzAwApFtGtR3ht6l3fY0"
     if not api_key:
         print("[error] GEMINI_API_KEY missing in environment/.env")
         return

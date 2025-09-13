@@ -23,17 +23,18 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+from output_config import OutputPaths
 
 # ========================= HARD-CODED CONFIG =========================
-FORM_PATH = "form_fields.json"          # <-- change this if needed
-RESUME_PATH = "parsed_resume.json"      # or a .txt resume
+FORM_PATH = OutputPaths.FORM_FIELDS_ENHANCED     # Now using centralized paths
+RESUME_PATH = OutputPaths.PARSED_RESUME          # Now using centralized paths
 MODEL_NAME = "gemini-2.5-flash-lite"    # or "gemini-1.5-pro"
-ANSWERS_OUT = "filled_answers.json"
-SKIPPED_OUT = "skipped_fields.json"
+ANSWERS_OUT = OutputPaths.FILLED_ANSWERS         # Now using centralized paths
+SKIPPED_OUT = OutputPaths.SKIPPED_FIELDS         # Now using centralized paths
 DRY_RUN = False                         # True -> preview prompt payload only, no API call
 
 # ---- NEW: supplemental context (hard-code either a path, or inline text) ----
-EXTRA_CONTEXT_PATH = "Supplemental_context.json"               # e.g., "supplemental_context.json" or "supplemental.txt"
+EXTRA_CONTEXT_PATH = "Supplemental-context.json"               # e.g., "supplemental_context.json" or "supplemental.txt"
 EXTRA_CONTEXT_TEXT = None
 # """
 # # - Candidate status: Currently a student seeking an internship.
@@ -257,6 +258,7 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
         fid = str(
             raw.get("id")
             or raw.get("field_id")
+            or raw.get("question_id")
             or raw.get("name")
             or raw.get("key")
             or raw.get("slug")
@@ -273,7 +275,11 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
             or ""
         ).strip()
 
-        rtype = (raw.get("type") or raw.get("kind") or raw.get("component") or "unknown").lower()
+        rtype = (raw.get("type") 
+                 or raw.get("kind") 
+                 or raw.get("component") 
+                 or raw.get("input_type")
+                 or "unknown").lower()
 
         allows_multiple = False
         multi_flags = [
@@ -298,19 +304,21 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
                     options.append(NormalizedOption(label=label))
 
         # coerce type
-        if rtype in ["select", "dropdown", "combo", "combobox"]:
-            rtype = "select"
-        elif rtype in ["checkbox", "checkboxes"]:
-            rtype = "multiselect"
-            allows_multiple = True
-        elif rtype in ["radio", "radiogroup", "choice"]:
+        if rtype in ["selectone", "radio"]:
             rtype = "radio"
-        elif rtype in ["input", "shorttext", "textinput"]:
+        elif rtype in ["input", "shorttext", "textinput", "text"]:
             rtype = "text"
         elif rtype in ["textarea", "longtext"]:
             rtype = "textarea"
-        elif rtype not in ["text", "textarea", "select", "multiselect", "radio", "unknown"]:
+        elif rtype in ["dropdown", "combobox", "select-one"]:
+            rtype = "select"
+        elif rtype in ["multi_select", "multiselect", "chips"]:
+            rtype = "multiselect"
+        elif rtype in ["checkbox", "checkboxes"]:
+            rtype = "checkbox"
+        elif rtype not in ["text", "textarea", "select", "multiselect", "checkbox", "radio", "unknown"]:
             rtype = "unknown"
+
 
         if fid and question:
             out.append(NormalizedField(

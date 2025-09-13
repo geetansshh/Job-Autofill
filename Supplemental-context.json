@@ -1,0 +1,18 @@
+{
+    "candidate_status": "Current student; seeking an internship",
+    "availability_start": "Immediate",
+    "notice_period_days": 0,
+    "work_authorization": {
+      "country": "India",
+      "has_valid_permit": true,
+      "requires_sponsorship": false
+    },
+    "preferred_locations_ordered": [
+      "Bengaluru (Bangalore)",
+      "Pune",
+      "Hyderabad",
+      "Delhi NCR (Gurgaon)"
+    ],
+    "willing_to_relocate": true
+  }
+  

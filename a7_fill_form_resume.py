@@ -25,17 +25,18 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Iterable
+from output_config import OutputPaths
 
 # ========================= CONFIG =========================
-JOB_URL = "https://job-boards.greenhouse.io/capco/jobs/6924131"   # <-- put the form URL here
+JOB_URL = "https://job-boards.greenhouse.io/gomotive/jobs/8137073002?gh_src=my.greenhouse.search"   # <-- GoMotive job URL
 
-# Answers file + fallbacks (still used for other fields; resume upload is now independent)
-ANSWERS_PATH = "user_completed_answers.json"
-ANSWERS_FALLBACKS = ["user_sompleted_answers.json", "answers.json"]
+# Answers file + fallbacks (now using centralized paths)
+ANSWERS_PATH = OutputPaths.USER_COMPLETED_ANSWERS
+ANSWERS_FALLBACKS = [str(OutputPaths.USER_COMPLETED_ANSWERS), "user_sompleted_answers.json", "answers.json"]
 
 # Resume path (env override recommended)
 RESUME_PATH = Path(os.getenv("RESUME_FILE", "")).expanduser() if os.getenv("RESUME_FILE") else (Path("data") / "resume.pdf")
-COVER_LETTER_PATH = Path("cover_letter.txt")  # used only if you also want cover letter uploads
+COVER_LETTER_PATH = OutputPaths.COVER_LETTER  # Now using centralized path
 
 HEADLESS = False
 SUBMIT_AT_END = True
@@ -43,13 +44,13 @@ REQUIRE_APPROVAL = True
 
 # Slow-mo + video
 SLOW_MO_MS = 300
-RECORD_VIDEO_DIR = "videos"
+RECORD_VIDEO_DIR = OutputPaths.VIDEOS_DIR
 
 # Screenshots
-SCREENSHOT_DIR = "screenshots"
+SCREENSHOT_DIR = OutputPaths.SCREENSHOTS_DIR
 
 # Combobox "type slow" behavior
-COMBO_OPEN_PAUSE_MS = 190
+COMBO_OPEN_PAUSE_MS = 200
 COMBO_TYPE_DELAY_MS = 200
 COMBO_POST_TYPE_WAIT_MS = 800
 
@@ -97,23 +98,34 @@ def find_field_control(page, field_id: str, question_text: str):
     """
     Return dict keys among: input, textarea, select, file, radio_container, combo, container
     """
-    # direct id/name
-    for sel in [f"#{field_id}", f"[name='{field_id}']"]:
-        loc = page.locator(sel)
-        if loc.count() > 0:
-            tag = loc.first.evaluate("e => e.tagName.toLowerCase()")
-            if tag == "select":
-                return {"select": loc.first}
-            elif tag == "input":
-                input_type = (loc.first.get_attribute("type") or "").lower()
-                if input_type == "file":
-                    return {"file": loc.first}
-                role = (loc.first.get_attribute("role") or "").lower()
-                if role == "combobox":
-                    return {"combo": loc.first}
-                return {"input": loc.first}
-            elif tag == "textarea":
-                return {"textarea": loc.first}
+    # direct id/name - use attribute selector for ids that might start with numbers
+    selectors = []
+    if field_id:
+        # Use attribute selector which works with numeric IDs
+        selectors.extend([f"[id='{field_id}']", f"[name='{field_id}']"])
+        # Also try the # selector if it doesn't start with a number
+        if not field_id[0].isdigit():
+            selectors.insert(0, f"#{field_id}")
+    
+    for sel in selectors:
+        try:
+            loc = page.locator(sel)
+            if loc.count() > 0:
+                tag = loc.first.evaluate("e => e.tagName.toLowerCase()")
+                if tag == "select":
+                    return {"select": loc.first}
+                elif tag == "input":
+                    input_type = (loc.first.get_attribute("type") or "").lower()
+                    if input_type == "file":
+                        return {"file": loc.first}
+                    role = (loc.first.get_attribute("role") or "").lower()
+                    if role == "combobox":
+                        return {"combo": loc.first}
+                    return {"input": loc.first}
+                elif tag == "textarea":
+                    return {"textarea": loc.first}
+        except Exception:
+            continue
 
     # by accessible label
     try:
@@ -125,6 +137,20 @@ def find_field_control(page, field_id: str, question_text: str):
             if tag == "textarea": return {"textarea": el}
             itype = (el.get_attribute("type") or "").lower()
             if itype == "file":   return {"file": el}
+            
+            # Check if it's a file upload container (div with file upload classes/attributes)
+            if tag == "div":
+                class_attr = (el.get_attribute("class") or "").lower()
+                role = (el.get_attribute("role") or "").lower()
+                if "file-upload" in class_attr or "upload" in class_attr or role == "group":
+                    # Look for actual file input inside
+                    file_input = el.locator("input[type='file']")
+                    if file_input.count() > 0:
+                        return {"file": file_input.first}
+                    else:
+                        # It's a file upload area but no direct input, treat as file
+                        return {"file": el}
+            
             role = (el.get_attribute("role") or "").lower()
             if role == "combobox": return {"combo": el}
             return {"input": el}
@@ -203,12 +229,62 @@ def find_field_control(page, field_id: str, question_text: str):
     return {"container": container} if container else {}
 
 # ---------- basic fill helpers ----------
-
 def safe_fill_text(locator, value: str):
-    try: locator.scroll_into_view_if_needed(timeout=2000)
-    except Exception: pass
-    locator.click(timeout=4000)
+    """Fill text-like controls, but *check* radios/checkboxes instead of filling.
+
+    Playwright cannot `.fill()` radios/checkboxes, so we detect and `.check()`.
+    If a value is provided and the input is part of a group, we try to check the
+    peer with the same `name` and matching `value`.
+    """
+    try:
+        locator.scroll_into_view_if_needed(timeout=2000)
+    except Exception:
+        pass
+
+    # Detect tag/type
+    input_type = None
+    tag_name = None
+    try:
+        input_type = (locator.get_attribute("type") or "").lower()
+    except Exception:
+        pass
+    try:
+        tag_name = locator.evaluate("el => el.tagName.toLowerCase()")
+    except Exception:
+        pass
+
+    # Handle file upload fields
+    if input_type == "file" or (tag_name == "input" and input_type == "file"):
+        # Skip file fields that have "NA" or similar non-file values
+        if str(value).lower() in ("na", "n/a", "none", "", "skip"):
+            print(f"  ⚠️ Skipping file upload field with non-file value: {value}")
+            return
+        # For actual file paths, let the auto-resume system handle it
+        print(f"  ℹ️ File upload field detected, auto-resume system will handle: {value}")
+        return
+
+    # Handle radio / checkbox
+    if input_type in ("radio", "checkbox") or (tag_name == "input" and input_type in ("radio", "checkbox")):
+        try:
+            if value:
+                name = locator.get_attribute("name")
+                if name:
+                    peer = locator.page.locator(f"[name='{name}'][value='{value}']")
+                    if peer.count() > 0:
+                        peer.first.check(timeout=6000)
+                        return
+        except Exception:
+            pass
+        locator.check(timeout=6000)
+        return
+
+    # For everything else, click-then-fill
+    try:
+        locator.click(timeout=4000)
+    except Exception:
+        pass
     locator.fill(str(value), timeout=6000)
+
 
 def click_option_label_near(page, label_text: str) -> bool:
     candidates = [
@@ -418,6 +494,37 @@ def auto_resume_tick(page) -> bool:
     # Nothing found this tick
     return False
 
+def determine_appropriate_file(page) -> Optional[str]:
+    """
+    Determine which file to upload based on page context:
+    - If there are cover letter related elements visible, prefer cover letter
+    - Otherwise default to resume
+    """
+    try:
+        # Check for cover letter related text on the page
+        cover_letter_indicators = [
+            "cover letter", "cover_letter", "coverletter", 
+            "motivation letter", "letter of motivation"
+        ]
+        
+        # Get visible text from the page
+        page_text = page.evaluate("document.body.innerText").lower()
+        
+        # Check if any cover letter indicators are prominently displayed
+        for indicator in cover_letter_indicators:
+            if indicator in page_text:
+                # If cover letter file exists, prefer it
+                cover_letter_path = Path(COVER_LETTER_PATH)
+                if cover_letter_path.exists():
+                    return str(cover_letter_path)
+        
+        # Default to resume
+        return _resume_path_abs()
+        
+    except Exception:
+        # Fallback to resume if anything fails
+        return _resume_path_abs()
+
 def enable_auto_resume_upload(page):
     """
     Attach file-chooser handler and do an initial scan.
@@ -429,25 +536,116 @@ def enable_auto_resume_upload(page):
     else:
         print(f"📄 Using resume: {file_path}")
 
-    # 1) Hook file chooser globally
+    # 1) Hook file chooser globally with smart file detection
     def _on_fc(fc):
-        fp = _resume_path_abs()
-        if not fp:
-            print("⚠️ File chooser opened but resume file not found.")
-            return
+        # Check if there's context about what type of upload this is
         try:
-            fc.set_files(fp)
-            print("✅ Resume set via file chooser handler")
+            context_str = page.evaluate("window.currentUploadContext || '{}'")
+            if isinstance(context_str, str) and context_str.startswith('{'):
+                context = json.loads(context_str)
+                field_type = context.get("field_type", "resume")
+                question_text = context.get("question_text", "")
+            else:
+                # Fallback for simple string context
+                field_type = "cover_letter" if ("cover" in str(context_str).lower() or "letter" in str(context_str).lower()) else "resume"
+                question_text = str(context_str)
+            
+            print(f"  🔍 File chooser opened for field type: {field_type}")
+            
+            # Determine file based on field type
+            if field_type == "cover_letter":
+                cover_letter_path = Path(COVER_LETTER_PATH)
+                if cover_letter_path.exists():
+                    file_path = str(cover_letter_path)
+                    print(f"  📄 Using existing cover letter: {cover_letter_path.name}")
+                else:
+                    # Create cover letter file if it doesn't exist
+                    try:
+                        cover_letter_path.parent.mkdir(parents=True, exist_ok=True)
+                        cover_letter_path.write_text("Cover letter content not available.", encoding='utf-8')
+                        file_path = str(cover_letter_path)
+                        print(f"  📝 Created placeholder cover letter: {cover_letter_path.name}")
+                    except:
+                        file_path = _resume_path_abs()  # Fallback to resume
+                        print(f"  ⚠️ Cover letter creation failed, using resume instead")
+            else:
+                # Use resume
+                file_path = _resume_path_abs()
+                print(f"  📄 Using resume: {Path(file_path).name if file_path else 'Not found'}")
+                
         except Exception as e:
-            print(f"⚠️ File chooser handler failed: {e}")
+            # Fallback to resume if context detection fails
+            file_path = _resume_path_abs()
+            print(f"  ⚠️ Context detection failed, using resume: {e}")
+        
+        if not file_path:
+            print("  ❌ No appropriate file found.")
+            return
+            
+        try:
+            fc.set_files(file_path)
+            file_name = Path(file_path).name
+            print(f"  ✅ File uploaded successfully: {file_name}")
+        except Exception as e:
+            print(f"  ❌ File upload failed: {e}")
 
     page.on("filechooser", _on_fc)
 
-    # 2) Initial attempt right away
+    # 2) Initial attempt right away - DISABLED to allow smart upload
+    # try:
+    #     auto_resume_tick(page)
+    # except Exception:
+    #     pass
+
+# ---------- smart file upload ----------
+
+def smart_file_upload(page, field_id: str, question_text: str, file_input) -> bool:
+    """
+    Upload appropriate file based on field type directly to the file input
+    """
     try:
-        auto_resume_tick(page)
-    except Exception:
-        pass
+        # Determine which file to upload based on field type
+        field_type = "cover_letter" if ("cover" in question_text.lower() or "letter" in question_text.lower()) else "resume"
+        
+        print(f"  📄 Uploading {field_type} for: {question_text}")
+        
+        # Get the appropriate file path
+        if field_type == "cover_letter":
+            cover_letter_path = Path(COVER_LETTER_PATH)
+            if not cover_letter_path.exists():
+                # Create cover letter if it doesn't exist
+                try:
+                    cover_letter_path.parent.mkdir(parents=True, exist_ok=True)
+                    cover_letter_path.write_text("Cover letter content not available.", encoding='utf-8')
+                    print(f"  📝 Created placeholder cover letter")
+                except:
+                    print(f"  ⚠️ Cover letter creation failed, using resume instead")
+                    field_type = "resume"
+                    file_path = _resume_path_abs()
+                else:
+                    file_path = str(cover_letter_path)
+            else:
+                file_path = str(cover_letter_path)
+        else:
+            file_path = _resume_path_abs()
+        
+        if not file_path:
+            print(f"  ❌ No file path available")
+            return False
+        
+        # Upload the file directly
+        file_input.set_input_files(file_path)
+        file_name = Path(file_path).name
+        print(f"  ✅ {field_type.replace('_', ' ').title()} uploaded: {file_name}")
+        
+        time.sleep(UPLOAD_SETTLE_MS / 1000.0)
+        return True
+        
+    except Exception as e:
+        print(f"  ❌ File upload failed for {question_text}: {e}")
+        return False
+
+
 
 # ---------- orchestrator for non-file fields ----------
 
@@ -493,6 +691,16 @@ def fill_one_field(page, field_id: str, question_text: str, answer: Any):
                 print(f"  ⚠️ Could not click option '{answer}' for: {question_text}")
             else:
                 print(f"  ✅ Clicked option for: {question_text} -> {answer}")
+        return
+
+    # File upload
+    if "file" in ctrl:
+        # Smart file upload - use appropriate file based on field
+        file_uploaded = smart_file_upload(page, field_id, question_text, ctrl["file"])
+        if file_uploaded:
+            print(f"  📄 File uploaded for: {question_text}")
+        else:
+            print(f"  ❌ Failed to upload file for: {question_text}")
         return
 
     # Text input / textarea
@@ -577,7 +785,7 @@ def main():
     answers = load_answers(ANSWERS_PATH, ANSWERS_FALLBACKS)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS, slow_mo=SLOW_MO_MS)
+        browser = p.chromium.launch(channel="chrome",headless=HEADLESS, slow_mo=SLOW_MO_MS)
         os.makedirs(RECORD_VIDEO_DIR, exist_ok=True)
         context = browser.new_context(
             accept_downloads=True,
@@ -601,8 +809,8 @@ def main():
         # Enable GLOBAL, JSON-INDEPENDENT resume upload
         enable_auto_resume_upload(page)
 
-        # First opportunistic attempt (in case input is already in DOM)
-        auto_resume_tick(page)
+        # First opportunistic attempt (in case input is already in DOM) - DISABLED
+        # auto_resume_tick(page)
 
         # Fill all answers (for non-file fields)
         for field_id, bundle in answers.items():
@@ -611,21 +819,21 @@ def main():
             if not question: 
                 continue
 
-            # opportunistically try uploading resume between fields too (if widget appears late)
-            auto_resume_tick(page)
+            # opportunistically try uploading resume between fields too (if widget appears late) - DISABLED
+            # auto_resume_tick(page)
 
             if answer is None:
                 continue
             fill_one_field(page, field_id, question, answer)
 
-        # One more try before snapshot/submit (late-rendered widgets)
-        auto_resume_tick(page)
+        # One more try before snapshot/submit (late-rendered widgets) - DISABLED
+        # auto_resume_tick(page)
 
         # Screenshot BEFORE submit
         before_path = snap(page, "before_submit")
 
-        # Last-chance try after everything is filled, right before submit
-        auto_resume_tick(page)
+        # Last-chance try after everything is filled, right before submit - DISABLED
+        # auto_resume_tick(page)
 
         # Approval gate
         did_submit = False

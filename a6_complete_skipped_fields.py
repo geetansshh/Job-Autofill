@@ -18,14 +18,15 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+from output_config import OutputPaths
 
-# ========================= HARD-CODED PATHS =========================
-FORM_PATH = "form_fields.json"
-SKIPPED_PATH = "skipped_fields.json"
-EXISTING_FILLED = "filled_answers.json"              # optional
-PREVIOUS_COMPLETED = "user_completed_answers.json"   # optional; reused/updated
-OUTPUT_ANSWERS = "user_completed_answers.json"
-STILL_SKIPPED = "still_skipped.json"
+# ========================= HARD-CODED PATHS (now centralized) =========================
+FORM_PATH = OutputPaths.FORM_FIELDS_ENHANCED        # Note: using cleaned form fields
+SKIPPED_PATH = OutputPaths.SKIPPED_FIELDS
+EXISTING_FILLED = OutputPaths.FILLED_ANSWERS         # optional
+PREVIOUS_COMPLETED = OutputPaths.USER_COMPLETED_ANSWERS   # optional; reused/updated
+OUTPUT_ANSWERS = OutputPaths.USER_COMPLETED_ANSWERS
+STILL_SKIPPED = OutputPaths.STILL_SKIPPED
 # ====================================================================
 
 # ----------------------- Schema Normalization -----------------------
@@ -69,7 +70,8 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
             continue
 
         fid = str(
-            raw.get("id")
+            raw.get("question_id")  # Primary field for our form structure
+            or raw.get("id")
             or raw.get("field_id")
             or raw.get("name")
             or raw.get("key")
@@ -87,7 +89,7 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
             or ""
         ).strip()
 
-        rtype = (raw.get("type") or raw.get("kind") or raw.get("component") or "unknown").lower()
+        rtype = (raw.get("input_type") or raw.get("type") or raw.get("kind") or raw.get("component") or "unknown").lower()
 
         allows_multiple = False
         multi_flags = [
@@ -250,6 +252,126 @@ def unwrap_previous_completed(prev_completed: Dict[str, Any]) -> Dict[str, Any]:
 
 # ---------------------------- Main ----------------------------
 
+def interactive_review_all_answers(wrapped_answers: Dict[str, Dict[str, Any]], 
+                                  field_map: Dict[str, NormalizedField]) -> Dict[str, Dict[str, Any]]:
+    """
+    Show all answers and allow user to modify any they don't like.
+    Returns updated wrapped_answers dictionary.
+    """
+    print("\n📝 Here are all your answers. You can modify any you don't like:")
+    print("   - Press Enter to keep the current answer")
+    print("   - Type a new answer to change it")
+    print("   - Type 'skip' or 'review' to see all answers first, then modify\n")
+    
+    # First, ask if they want to review all answers
+    try:
+        review_mode = input("Would you like to review all answers first? [y/N]: ").strip().lower()
+        show_all_first = review_mode in ('y', 'yes', 'review')
+    except EOFError:
+        show_all_first = False
+    
+    # Show all answers first if requested
+    if show_all_first:
+        print("\n📋 ALL CURRENT ANSWERS:")
+        print("-" * 60)
+        for i, (field_id, bundle) in enumerate(wrapped_answers.items(), 1):
+            question = bundle.get("question", "")
+            answer = bundle.get("answer", "")
+            print(f"{i:2d}. {question}")
+            print(f"    → {answer}")
+            print()
+        print("-" * 60)
+    
+    # Now allow modifications
+    modified_answers = dict(wrapped_answers)  # Copy to modify
+    
+    print(f"\n🔄 MODIFICATION MODE - {len(wrapped_answers)} questions to review:")
+    print("=" * 60)
+    
+    for i, (field_id, bundle) in enumerate(wrapped_answers.items(), 1):
+        question = bundle.get("question", "")
+        current_answer = bundle.get("answer", "")
+        
+        print(f"\n[{i}/{len(wrapped_answers)}] {question}")
+        print(f"Current answer: {current_answer}")
+        
+        # Get field info for validation
+        field_info = field_map.get(field_id)
+        
+        try:
+            if field_info and field_info.options:
+                # Show options for select/radio fields
+                print("Available options:")
+                for j, opt in enumerate(field_info.options, 1):
+                    marker = "→" if opt.label == current_answer else " "
+                    print(f"  {marker} {j}. {opt.label}")
+                
+                user_input = input("Keep current (Enter) or choose number/type new answer: ").strip()
+                
+                if user_input == "":
+                    # Keep current answer
+                    continue
+                elif user_input.replace(" ", "").replace(",", "").isdigit() or " " in user_input or "," in user_input:
+                    # Handle single number or multiple numbers (e.g., "2", "2 3", "1,2,3", "1 4 5")
+                    try:
+                        # Split by both space and comma
+                        parts = user_input.replace(",", " ").split()
+                        choice_nums = [int(x.strip()) for x in parts if x.strip().isdigit()]
+                        selected_options = []
+                        
+                        for choice_num in choice_nums:
+                            if 1 <= choice_num <= len(field_info.options):
+                                selected_options.append(field_info.options[choice_num - 1].label)
+                            else:
+                                print(f"  ⚠️ Invalid choice {choice_num} ignored.")
+                        
+                        if selected_options:
+                            # For multi-select, keep as list; for single select, use first item
+                            if field_info.allows_multiple or len(selected_options) > 1:
+                                new_answer = selected_options
+                            else:
+                                new_answer = selected_options[0]
+                            
+                            modified_answers[field_id]["answer"] = new_answer
+                            print(f"  ✅ Changed to: {new_answer}")
+                        else:
+                            print(f"  ❌ No valid choices found. Keeping current answer.")
+                    except ValueError:
+                        # Not valid numbers, treat as custom text
+                        modified_answers[field_id]["answer"] = user_input
+                        print(f"  ✅ Changed to: {user_input}")
+                else:
+                    # User typed custom answer
+                    modified_answers[field_id]["answer"] = user_input
+                    print(f"  ✅ Changed to: {user_input}")
+            else:
+                # Text field - just ask for new value
+                user_input = input("Keep current (Enter) or type new answer: ").strip()
+                
+                if user_input != "":
+                    modified_answers[field_id]["answer"] = user_input
+                    print(f"  ✅ Changed to: {user_input}")
+        
+        except EOFError:
+            print("  ⏭️ Skipping remaining questions...")
+            break
+        except KeyboardInterrupt:
+            print("\n  ⏭️ Review interrupted. Keeping current answers.")
+            break
+    
+    # Count changes
+    changes = 0
+    for field_id in wrapped_answers:
+        if str(wrapped_answers[field_id]["answer"]) != str(modified_answers[field_id]["answer"]):
+            changes += 1
+    
+    if changes > 0:
+        print(f"\n✅ Review complete! {changes} answer(s) modified.")
+    else:
+        print(f"\n✅ Review complete! No changes made.")
+    
+    return modified_answers
+
 def main():
     # Load form + normalize fields
     form = load_json(FORM_PATH)
@@ -326,8 +448,14 @@ def main():
         q = f.question if f else "(question text not found in form)"
         wrapped_output[fid] = {"question": q, "answer": val}
 
+    # Interactive review of ALL answers
+    print("\n" + "="*60)
+    print("📋 FINAL REVIEW - Check all your answers before form filling")
+    print("="*60)
+    final_answers = interactive_review_all_answers(wrapped_output, field_map)
+    
     with open(OUTPUT_ANSWERS, "w", encoding="utf-8") as f:
-        json.dump(wrapped_output, f, ensure_ascii=False, indent=2)
+        json.dump(final_answers, f, ensure_ascii=False, indent=2)
     with open(STILL_SKIPPED, "w", encoding="utf-8") as f:
         json.dump(still_skipped, f, ensure_ascii=False, indent=2)
 
