@@ -12,16 +12,24 @@
 from __future__ import annotations
 import asyncio, os, re, textwrap
 from pathlib import Path
+
+# Suppress Google API/GRPC warnings
+os.environ['GRPC_VERBOSITY'] = 'ERROR'
+os.environ['GRPC_TRACE'] = ''
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['GOOGLE_CLOUD_DISABLE_GRPC_FOR_REST'] = 'true'
+
 from output_config import OutputPaths
 
 # ===================== EDIT THESE =====================
-JOB_URL        = "https://job-boards.greenhouse.io/gomotive/jobs/8137073002?gh_src=my.greenhouse.search"     # <-- your job URL
-RESUME_PATH    = "./data/resume.pdf"               # prefers .txt; falls back to .pdf
+JOB_URL        = "https://job-boards.greenhouse.io/hackerrank/jobs/7211528?gh_jid=7211528&gh_src=1836e8621us"     # <-- your job URL
+RESUME_PATH    = "./data/Geetansh_resume.pdf"               # prefers .txt; falls back to .pdf
 CANDIDATE_NAME = "Geetansh"                        # <-- your name (or None)
 EXTRAS         = None                             # <-- extra instructions for cover letter (or None)
 SUMMARY_ROLE_BULLETS  = 5   # bullets under ROLE SUMMARY
 SUMMARY_ABOUT_BULLETS = 3   # bullets under ABOUT THE COMPANY
 WORD_TARGET    = 160        # cover letter ~140–180 words
+REQUIRE_USER_APPROVAL = False   # Set to False to skip review and auto-save
 # OUTDIR removed - now using centralized output paths
 # ======================================================
 
@@ -91,47 +99,111 @@ def crawl_markdown(url: str) -> str:
 def gen_with_gemini(prompt: str) -> str | None:
     api = os.getenv("GEMINI_API_KEY")
     if not api:
+        print("❌ No GEMINI_API_KEY found in environment")
         return None
     try:
         import google.generativeai as genai
         genai.configure(api_key=api)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
         resp = model.generate_content(prompt)
+        print("✅ Successfully used Gemini AI")
         return (resp.text or "").strip()
-    except Exception:
+    except Exception as e:
+        print(f"❌ Gemini API error: {str(e)[:100]}...")
         return None
 
 
-# ---------- Light title/company detection (optional) ----------
+# ---------- Markdown cleaning ----------
+def clean_job_markdown(md: str) -> str:
+    """Clean markdown to remove navigation, links, and noise before AI processing"""
+    lines = md.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        line = line.strip()
+        
+        # Skip empty lines
+        if not line:
+            continue
+            
+        # Skip image/link markdown
+        if line.startswith('[![') or line.startswith('[]('):
+            continue
+            
+        # Skip "Apply Now" and navigation
+        if line in ['Apply Now', 'View All Jobs', 'Share on Linkedin', 'Share on Facebook', 'Share on Twitter', 'Share on Whatsapp']:
+            continue
+            
+        # Clean up markdown formatting but keep important text
+        # Remove image markdown but keep link text
+        line = re.sub(r'\[!\[.*?\]\(.*?\)\]\(.*?\)', '', line)
+        line = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', line)
+        
+        cleaned_lines.append(line)
+    
+    return '\n'.join(cleaned_lines)
+
+# ---------- Light title/company detection (improved) ----------
 def guess_title_company_from_markdown(md: str) -> tuple[str, str]:
     lines = [l.strip() for l in md.splitlines() if l.strip()]
     title = ""
     company = ""
-
-    # First heading-ish line as title
-    for l in lines[:20]:
-        if l.startswith("#"):
-            title = l.lstrip("#").strip()
+    
+    # Look for company name first - check for common patterns
+    company_patterns = [
+        r'About Us.*?Sense is',  # "About Us" followed by "Sense is"
+        r'Founded in \d+, (.*?) is',  # "Founded in YEAR, COMPANY is"
+        r'(Sense|SenseHQ) is a',  # Direct mention of Sense/SenseHQ
+    ]
+    
+    for pattern in company_patterns:
+        match = re.search(pattern, md, re.IGNORECASE | re.DOTALL)
+        if match and 'Sense' in match.group(0):
+            company = "Sense"
             break
-    if not title and lines:
-        title = lines[0][:120]
-
-    # Try split patterns: "Role – Company" / "Role | Company" / "Role at Company"
-    m = re.split(r"\s[-–|•]\s", title)
-    if len(m) >= 2 and 2 <= len(m[-1]) <= 80:
-        company = m[-1].strip()
-        title = " - ".join(m[:-1]).strip()
-    else:
-        m2 = re.search(r"\b(.+?)\s+at\s+(.+)$", title, re.I)
-        if m2:
-            title = m2.group(1).strip()
-            company = m2.group(2).strip()
-
-    if not company:
-        for l in lines[:30]:
-            if l.startswith(("**","__")) and l.endswith(("**","__")) and 2 < len(l) < 80:
-                company = l.strip("*_")
+    
+    # Look for job title - avoid generic sections like "What You'll Do", "Perks & Benefits"
+    # Focus on actual job titles that appear near the top
+    avoid_titles = {
+        "what you'll do", "job description", "job requirement", "perks & benefits", 
+        "about us", "apply now", "view all jobs", "share on", "powered by"
+    }
+    
+    # Try to find job title in the first few meaningful lines
+    for i, line in enumerate(lines[:15]):
+        line_clean = line.lower().strip("*#_- ")
+        
+        # Skip navigation, headers, and generic sections
+        if any(avoid in line_clean for avoid in avoid_titles):
+            continue
+        if line.startswith(('[![', '[', 'https://', 'Apply Now')):
+            continue
+        if len(line_clean) < 5 or len(line_clean) > 100:
+            continue
+            
+        # Look for job title patterns
+        job_keywords = ['intern', 'engineer', 'developer', 'analyst', 'manager', 'specialist', 'coordinator']
+        if any(keyword in line_clean for keyword in job_keywords):
+            title = line.strip("*#_- ")
+            break
+    
+    # Fallback: if no title found, look for the first substantial line
+    if not title:
+        for line in lines[:10]:
+            if (5 < len(line) < 100 and 
+                not line.startswith(('[![', '[', 'https://')) and
+                not any(avoid in line.lower() for avoid in avoid_titles)):
+                title = line.strip("*#_- ")
                 break
+    
+    # Fallback company detection
+    if not company:
+        for line in lines[:30]:
+            if 'sense' in line.lower() and len(line) < 100:
+                if 'sense is' in line.lower():
+                    company = "Sense"
+                    break
+    
     return title, company
 
 
@@ -144,20 +216,25 @@ def build_summary_prompt(job_markdown: str,
     title_line = f"Detected Title: {detected_title}\n" if detected_title else ""
     company_line = f"Detected Company: {detected_company}\n" if detected_company else ""
     return textwrap.dedent(f"""
-        You are given a JOB DESCRIPTION in Markdown. Produce a concise, job-focused summary.
-        IMPORTANT: Base the summary ONLY on the job Markdown. Do NOT use candidate information.
+        You are analyzing a JOB DESCRIPTION to extract key information. Focus on actual job content, not website navigation or formatting.
 
         {title_line}{company_line}
         JOB DESCRIPTION (Markdown):
         \"\"\"{job_markdown[:25000]}\"\"\"
 
+        INSTRUCTIONS:
+        1. For ABOUT THE COMPANY: Extract meaningful facts about the company's business, mission, size, or industry
+        2. For ROLE SUMMARY: Extract specific job responsibilities, requirements, or tasks mentioned in the job description
+        3. IGNORE: Navigation links, social media buttons, "Apply Now" buttons, website headers/footers, image tags
+        4. Focus on substantive content about the job and company
+
         OUTPUT FORMAT (exact):
         SUMMARY:
         ABOUT THE COMPANY:
-        - (max {about_bullets} bullets)
+        - (max {about_bullets} concise bullets, each under 80 characters)
 
         ROLE SUMMARY:
-        - (max {role_bullets} bullets)
+        - (max {role_bullets} brief job tasks/requirements, each under 80 characters)
     """).strip()
 
 
@@ -171,7 +248,7 @@ def build_cover_prompt(job_markdown: str,
     extra_line = f"Additional instructions: {extras}\n" if extras else ""
     company_hint = f"Company: {detected_company}\n" if detected_company else ""
     return textwrap.dedent(f"""
-        You are given a JOB DESCRIPTION in Markdown and a candidate RESUME in plain text.
+        You are writing a professional cover letter for a job application.
 
         {name_line}{extra_line}{company_hint}
         JOB DESCRIPTION (Markdown):
@@ -180,16 +257,23 @@ def build_cover_prompt(job_markdown: str,
         RESUME (plain text):
         \"\"\"{resume_text[:25000]}\"\"\"
 
-        TASK:
-        Write a COVER LETTER of ~{word_target} words (±20), confident and warm, specific to this role.
-        - Use 2–4 concrete skills/achievements from the resume that match the JD.
-        - Address the company if provided; otherwise keep greeting generic.
-        - Avoid placeholders and generic fluff.
-        - Close with a short call to action.
+        INSTRUCTIONS:
+        1. Extract the actual job title, responsibilities, and requirements from the job description
+        2. Ignore website navigation, headers, "Apply Now" buttons, and formatting elements
+        3. Focus on technical skills mentioned: Python, SQL, APIs, LLM prompts, MySQL, etc.
+        4. Match the candidate's experience with Python, web scraping, data pipelines, and software engineering
+        5. Write a professional, specific cover letter addressing the real job content
+
+        REQUIREMENTS:
+        - Address the letter to "{detected_company} Hiring Team" if company provided
+        - ~{word_target} words (±20)
+        - Mention 2-3 specific technical skills that match the job
+        - Reference relevant experience from the resume
+        - Professional and confident tone
 
         OUTPUT FORMAT (exact):
         COVER LETTER:
-        Paragraphs here
+        [Your cover letter content here]
     """).strip()
 
 
@@ -199,28 +283,59 @@ def fallback_job_summary(job_md: str,
                          role_bullets: int) -> str:
     lines = [l.strip() for l in job_md.splitlines() if l.strip()]
     about = []
-    role  = []
+    role = []
 
-    # Simple heuristic: pick lines mentioning "About", "Who we are" for company;
-    # otherwise, early intro lines. For role, prefer bullet-looking or long, task-like lines.
-    for ln in lines[:80]:
+    # Extract company info - look for substantial paragraphs about the company
+    in_about_section = False
+    for i, ln in enumerate(lines):
         if len(about) >= about_bullets:
             break
-        if re.search(r"\babout\b|\bwho (we|i) are\b", ln, re.I):
-            about.append(ln.lstrip("-*• ").strip())
-    if not about:
-        about = [l.lstrip("-*• ").strip() for l in lines[:about_bullets]]
-
+        
+        # Detect about section
+        if re.search(r"^about us$|^who we are$", ln, re.I):
+            in_about_section = True
+            continue
+        
+        # If in about section or line mentions company info
+        if (in_about_section or 
+            re.search(r"sense is|founded in|startup|employees|customers|funding", ln, re.I)):
+            
+            # Skip short lines and apply buttons, keep lines concise
+            if 30 < len(ln) < 120 and "apply now" not in ln.lower():
+                # Truncate long lines to keep bullets concise
+                bullet_text = ln.lstrip("-*• ").strip()
+                if len(bullet_text) > 80:
+                    bullet_text = bullet_text[:75] + "..."
+                about.append(bullet_text)
+                in_about_section = False  # Only take next substantial line after header
+    
+    # Extract role info - look for job requirements and responsibilities
+    in_job_section = False
     for ln in lines:
         if len(role) >= role_bullets:
             break
-        score = (2 if ln.lstrip().startswith(("-", "*", "•")) else 0) + (1 if len(ln) > 50 else 0)
-        if re.search(r"(responsib|require|experience|skills|you will|role|job description|what you)", ln, re.I):
-            score += 1
-        if score >= 1:
-            role.append(ln.lstrip("-*• ").strip())
+            
+        # Detect job sections
+        if re.search(r"job description|what you'll do|requirements|looking for", ln, re.I):
+            in_job_section = True
+            continue
+            
+        # Look for bullet points or substantial job-related content
+        if (ln.startswith(("*", "-", "•")) or 
+            re.search(r"develop|write|contribute|work with|python|sql|api|llm", ln, re.I)):
+            
+            if 20 < len(ln) < 150:
+                # Keep role bullets concise
+                bullet_text = ln.lstrip("-*• ").strip()
+                if len(bullet_text) > 80:
+                    bullet_text = bullet_text[:75] + "..."
+                role.append(bullet_text)
+
+    # Fill with fallback content if needed
+    if not about:
+        about = [l for l in lines[:10] if len(l) > 30 and "apply" not in l.lower()][:about_bullets]
     if not role:
-        role = [l.lstrip("-*• ").strip() for l in lines[:role_bullets]]
+        role = [l for l in lines if len(l) > 30 and any(kw in l.lower() for kw in ["python", "sql", "develop", "work"])][:role_bullets]
 
     out = "SUMMARY:\n"
     out += "ABOUT THE COMPANY:\n" + "\n".join(f"- {x}" for x in about[:about_bullets]) + "\n\n"
@@ -266,12 +381,15 @@ def generate(job_url: str,
     # Save the raw job page markdown
     OutputPaths.JOB_PAGE_MD.write_text(job_md, encoding="utf-8")
 
-    # Light detection for nicer prompts
-    detected_title, detected_company = guess_title_company_from_markdown(job_md)
+    # Clean markdown for AI processing
+    job_md_clean = clean_job_markdown(job_md)
+
+    # Light detection for nicer prompts (use cleaned version)
+    detected_title, detected_company = guess_title_company_from_markdown(job_md_clean)
 
     # 1) SUMMARY (job-focused only)
     summary_prompt = build_summary_prompt(
-        job_markdown=job_md,
+        job_markdown=job_md_clean,
         detected_title=detected_title,
         detected_company=detected_company,
         about_bullets=about_bullets,
@@ -280,12 +398,16 @@ def generate(job_url: str,
     summary_ai = gen_with_gemini(summary_prompt)
     if summary_ai and summary_ai.strip().startswith("SUMMARY:"):
         summary = summary_ai.strip()
+        print("✅ Using AI-generated summary")
     else:
-        summary = fallback_job_summary(job_md, about_bullets, role_bullets)
+        summary = fallback_job_summary(job_md_clean, about_bullets, role_bullets)
+        print("⚠️ Using fallback summary (AI failed)")
+        if summary_ai:
+            print(f"AI output was: {summary_ai[:100]}...")
 
     # 2) COVER LETTER (job + resume)
     cover_prompt = build_cover_prompt(
-        job_markdown=job_md,
+        job_markdown=job_md_clean,
         resume_text=resume_text,
         name=name,
         extras=extras,
@@ -295,8 +417,10 @@ def generate(job_url: str,
     cover_ai = gen_with_gemini(cover_prompt)
     if cover_ai and cover_ai.strip().startswith("COVER LETTER:"):
         cover = cover_ai.strip()
+        print("✅ Using AI-generated cover letter")
     elif cover_ai:
         cover = "COVER LETTER:\n" + cover_ai.strip()
+        print("✅ Using AI-generated cover letter (formatted)")
     else:
         cover = fallback_cover_letter(job_md, resume_text, name, word_target, detected_company)
 
@@ -315,6 +439,29 @@ def main():
         word_target=WORD_TARGET,
     )
 
+    detected_title, detected_company = guess_title_company_from_markdown(job_md)
+    
+    print("\n" + "="*80)
+    print(f"JOB TITLE: {detected_title or 'Not detected'}")
+    print(f"COMPANY: {detected_company or 'Not detected'}")
+    print("="*80)
+    print("\nJOB SUMMARY:")
+    print(summary)
+    print("\n" + "="*80)
+    print("\nCOVER LETTER (preview):")
+    print(cover)
+    print("="*80)
+
+    if REQUIRE_USER_APPROVAL:
+        proceed = input("\nDoes this look correct? Proceed to next step? (yes/no): ").strip().lower()
+        if proceed != "yes":
+            print("❌ Exiting at user request.")
+            import sys
+            sys.exit(0)
+        print("✅ User approved. Saving files...")
+    else:
+        print("✅ Auto-saving files (user approval disabled)...")
+
     OutputPaths.JOB_SUMMARY.write_text(summary, encoding="utf-8")
     OutputPaths.COVER_LETTER.write_text(cover, encoding="utf-8")
 
@@ -322,11 +469,6 @@ def main():
     print(f" - {OutputPaths.JOB_PAGE_MD}       (raw job Markdown)")
     print(f" - {OutputPaths.JOB_SUMMARY}   (job-focused summary)")
     print(f" - {OutputPaths.COVER_LETTER}  (tailored cover letter)")
-
-    print("\n=== SUMMARY (job-focused) ===\n")
-    print(summary)
-    print("\n=== COVER LETTER ===\n")
-    print(cover)
 
 if __name__ == "__main__":
     main()

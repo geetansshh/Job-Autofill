@@ -18,6 +18,13 @@ Run:
   python fill_form_from_resume_general.py
 """
 
+import os
+# Suppress Google API/GRPC warnings
+os.environ['GRPC_VERBOSITY'] = 'ERROR'
+os.environ['GRPC_TRACE'] = ''
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['GOOGLE_CLOUD_DISABLE_GRPC_FOR_REST'] = 'true'
+
 import json
 import os
 import re

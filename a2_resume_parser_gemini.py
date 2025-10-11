@@ -12,10 +12,17 @@ import json
 import os
 import pdfplumber
 from dotenv import load_dotenv
+
+# Suppress Google API/GRPC warnings
+os.environ['GRPC_VERBOSITY'] = 'ERROR'
+os.environ['GRPC_TRACE'] = ''
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['GOOGLE_CLOUD_DISABLE_GRPC_FOR_REST'] = 'true'
+
 from output_config import OutputPaths
 
 # ---- edit this to your actual file ----
-RESUME_PDF = "./data/resume.pdf"
+RESUME_PDF = "./data/Geetansh_resume.pdf"
 OUT_PATH   = OutputPaths.PARSED_RESUME  # Now using centralized output path
 MODEL_NAME = "gemini-2.5-flash-lite"
 # ---------------------------------------

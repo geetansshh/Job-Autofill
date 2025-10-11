@@ -28,14 +28,14 @@ from typing import Any, Dict, List, Optional, Iterable
 from output_config import OutputPaths
 
 # ========================= CONFIG =========================
-JOB_URL = "https://job-boards.greenhouse.io/gomotive/jobs/8137073002?gh_src=my.greenhouse.search"   # <-- GoMotive job URL
+JOB_URL = "https://job-boards.greenhouse.io/hackerrank/jobs/7211528?gh_jid=7211528&gh_src=1836e8621us"   # <-- HackerRank job URL
 
 # Answers file + fallbacks (now using centralized paths)
 ANSWERS_PATH = OutputPaths.USER_COMPLETED_ANSWERS
 ANSWERS_FALLBACKS = [str(OutputPaths.USER_COMPLETED_ANSWERS), "user_sompleted_answers.json", "answers.json"]
 
 # Resume path (env override recommended)
-RESUME_PATH = Path(os.getenv("RESUME_FILE", "")).expanduser() if os.getenv("RESUME_FILE") else (Path("data") / "resume.pdf")
+RESUME_PATH = Path(os.getenv("RESUME_FILE", "")).expanduser() if os.getenv("RESUME_FILE") else (Path("data") / "Geetansh_resume.pdf")
 COVER_LETTER_PATH = OutputPaths.COVER_LETTER  # Now using centralized path
 
 HEADLESS = False
@@ -62,6 +62,30 @@ UPLOAD_TEXT_RE = re.compile(r"(upload|browse|choose file|attach|select file|resu
 
 # (Commented) geolocation button text
 LOCATE_BUTTON_RE = re.compile(r"(locate me|use my location|detect location|current location)", re.I)
+
+def click_apply_like_things(page):
+    """Click Apply/Continue buttons to reveal forms (same as form extractor)"""
+    candidates = [
+        "button:has-text('Apply')",
+        "button:has-text('Continue')", 
+        "a:has-text('Apply')",
+        "a:has-text('Continue')",
+        "button:has-text('Apply Now')",
+        "a:has-text('Apply Now')",
+        "[role='button']:has-text('Apply')",
+        ".btn:has-text('Apply')",
+        ".button:has-text('Apply')",
+    ]
+    for sel in candidates:
+        try:
+            loc = page.locator(sel)
+            if loc.first.is_visible():
+                print(f"🖱️  Clicking '{sel}' to navigate to form...")
+                loc.first.click(timeout=3000)
+                return True
+        except Exception:
+            pass
+    return False
 # =========================================================
 
 YES_WORDS = {"true": "Yes", "yes": "Yes", "y": "Yes", "1": "Yes"}
@@ -126,6 +150,31 @@ def find_field_control(page, field_id: str, question_text: str):
                     return {"textarea": loc.first}
         except Exception:
             continue
+
+    # Special handling for file upload fields - look for common upload button patterns
+    if "resume" in field_id.lower() or "cv" in field_id.lower() or "upload" in field_id.lower():
+        upload_selectors = [
+            "button:has-text('SELECT RESUME')",
+            "button:has-text('Select Resume')",
+            "button:has-text('Upload Resume')",
+            "button:has-text('Choose File')",
+            "button:has-text('Browse')",
+            "button:has-text('Upload')",
+            "[role='button']:has-text('SELECT RESUME')",
+            "[role='button']:has-text('Select Resume')",
+            ".upload-button",
+            ".file-upload-button",
+            ".resume-upload",
+        ]
+        
+        for selector in upload_selectors:
+            try:
+                loc = page.locator(selector)
+                if loc.count() > 0 and loc.first.is_visible():
+                    print(f"  🎯 Found file upload button: {selector}")
+                    return {"file": loc.first}
+            except Exception:
+                continue
 
     # by accessible label
     try:
@@ -633,13 +682,32 @@ def smart_file_upload(page, field_id: str, question_text: str, file_input) -> bo
             print(f"  ❌ No file path available")
             return False
         
-        # Upload the file directly
-        file_input.set_input_files(file_path)
-        file_name = Path(file_path).name
-        print(f"  ✅ {field_type.replace('_', ' ').title()} uploaded: {file_name}")
-        
-        time.sleep(UPLOAD_SETTLE_MS / 1000.0)
-        return True
+        # Try different upload methods based on element type
+        try:
+            # Method 1: Traditional file input
+            file_input.set_input_files(file_path)
+            file_name = Path(file_path).name
+            print(f"  ✅ {field_type.replace('_', ' ').title()} uploaded: {file_name}")
+            time.sleep(UPLOAD_SETTLE_MS / 1000.0)
+            return True
+        except Exception as e1:
+            print(f"  🔄 Traditional upload failed, trying file chooser method: {e1}")
+            
+            # Method 2: Custom upload button with file chooser
+            try:
+                with page.expect_file_chooser() as fc_info:
+                    file_input.click(timeout=5000)
+                
+                file_chooser = fc_info.value
+                file_chooser.set_files(file_path)
+                
+                file_name = Path(file_path).name
+                print(f"  ✅ {field_type.replace('_', ' ').title()} uploaded via file chooser: {file_name}")
+                time.sleep(UPLOAD_SETTLE_MS / 1000.0)
+                return True
+            except Exception as e2:
+                print(f"  ❌ File chooser upload also failed: {e2}")
+                return False
         
     except Exception as e:
         print(f"  ❌ File upload failed for {question_text}: {e}")
@@ -717,11 +785,16 @@ def fill_one_field(page, field_id: str, question_text: str, answer: Any):
 def maybe_click_submit(page) -> bool:
     candidates = [
         "button:has-text('Submit')",
+        "button:has-text('Submit Application')",
+        "button:has-text('Apply Now')",
         "button:has-text('Apply')",
+        "button:has-text('Send Application')",
         "button:has-text('Next')",
         "input[type='submit']",
         "[role='button']:has-text('Submit')",
         "[role='button']:has-text('Apply')",
+        ".submit-button",
+        ".apply-button",
     ]
     for sel in candidates:
         try:
@@ -804,7 +877,20 @@ def main():
         except PWTimeout:
             print("⚠️ Page load timed out; proceeding...")
 
+        # Try to navigate to the actual form page (same as form extractor)
+        print("🖱️  Attempting to click Apply/Continue buttons to reach form...")
+        if click_apply_like_things(page):
+            print("✅ Successfully clicked Apply/Continue button")
+            try:
+                page.wait_for_load_state("networkidle", timeout=10_000)
+            except Exception:
+                pass
+            page.wait_for_timeout(2000)  # Additional wait for form to load
+        else:
+            print("⚠️  No Apply/Continue buttons found, assuming already on form page")
+
         print(f"🎥 Recording enabled. Saving to: {RECORD_VIDEO_DIR}")
+        print(f"📍 Current URL: {page.url}")
 
         # Enable GLOBAL, JSON-INDEPENDENT resume upload
         enable_auto_resume_upload(page)
@@ -839,11 +925,52 @@ def main():
         did_submit = False
         if SUBMIT_AT_END:
             if approved():
+                print("✅ User approved submission. Attempting to submit...")
                 try:
-                    with page.expect_navigation(wait_until="load", timeout=60000):
+                    # Try with navigation expectation first
+                    with page.expect_navigation(wait_until="load", timeout=10000):
                         did_submit = maybe_click_submit(page)
+                    print("📄 Form submitted with page navigation")
                 except Exception:
-                    did_submit = maybe_click_submit(page)
+                    # If no navigation happens, that means the first submit probably worked
+                    # but the page didn't navigate (common with success messages on same page)
+                    print("🔄 No navigation detected after submit - checking if submit already worked...")
+                    
+                    # Check if we can see success indicators
+                    time.sleep(2)  # Wait for success message to appear
+                    success_indicators = [
+                        "text=Application Received",
+                        "text=Thank you",
+                        "text=Successfully submitted", 
+                        "text=Application submitted",
+                        ".success",
+                        ".confirmation"
+                    ]
+                    
+                    form_submitted = False
+                    for indicator in success_indicators:
+                        try:
+                            if page.locator(indicator).count() > 0:
+                                print(f"✅ Found success indicator: {indicator}")
+                                form_submitted = True
+                                break
+                        except Exception:
+                            continue
+                    
+                    if form_submitted:
+                        did_submit = True
+                        print("✅ Form submitted successfully (confirmed by success message)")
+                    else:
+                        # Last resort: try clicking submit again
+                        print("🔄 No success message found, trying submit again...")
+                        second_attempt = maybe_click_submit(page)
+                        if second_attempt:
+                            did_submit = True
+                            print("✅ Form submitted on second attempt")
+                        else:
+                            did_submit = False
+                            print("❌ Submit failed - no button found on second attempt")
+                
                 time.sleep(2)
             else:
                 print("❎ Submission not approved. Skipping submit.")

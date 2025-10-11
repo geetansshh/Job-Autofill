@@ -14,14 +14,21 @@ Outputs: form_fields_enhanced.json with complete field list
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from pathlib import Path
-import json, re, time
+import json, re, time, os
+
+# Suppress Google API/GRPC warnings
+os.environ['GRPC_VERBOSITY'] = 'ERROR'
+os.environ['GRPC_TRACE'] = ''
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['GOOGLE_CLOUD_DISABLE_GRPC_FOR_REST'] = 'true'
+
 import google.generativeai as genai
 from output_config import OutputPaths
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 
 # Configuration
-JOB_URL = "https://job-boards.greenhouse.io/gomotive/jobs/8137073002?gh_src=my.greenhouse.search"
+JOB_URL = "https://job-boards.greenhouse.io/hackerrank/jobs/7211528?gh_jid=7211528&gh_src=1836e8621us"
 OUT_FILE = OutputPaths.FORM_FIELDS_ENHANCED
 MODEL_NAME = "gemini-2.5-flash-lite"
 
@@ -161,22 +168,95 @@ def _aria_comboboxes(frame, fields):
             q = cb.evaluate(_label_js())
             opts = []
             try:
+                # First ensure the combobox is focused
+                cb.focus()
                 cb.click(timeout=1000)
-                time.sleep(0.2)
-                options = frame.locator("[role='option']")
-                k = min(options.count(), 50)
-                for j in range(k):
-                    o = options.nth(j)
-                    label = o.inner_text().strip()
-                    value = o.get_attribute("data-value") or label
-                    opts.append({"label": label, "value": value})
-            except Exception:
-                pass
-            # Try closing
+                # Try arrow down to ensure popup opens
+                cb.press("ArrowDown")
+                time.sleep(0.3)  # Wait a bit longer for popup to appear
+                
+                # Use JavaScript to find the correct popup for THIS combobox
+                opts = cb.evaluate("""
+                (combobox) => {
+                    function isVisible(el) {
+                        if (!el) return false;
+                        const cs = getComputedStyle(el);
+                        if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) return false;
+                        const r = el.getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                    }
+                    
+                    function getPopupForCombobox(combo) {
+                        // 1) Try aria-controls / aria-owns first
+                        const ctrl = combo.getAttribute('aria-controls') || combo.getAttribute('aria-owns');
+                        if (ctrl) {
+                            const el = document.getElementById(ctrl);
+                            if (el && isVisible(el)) return el;
+                        }
+                        
+                        // 2) Try active descendant hints
+                        const act = combo.getAttribute('aria-activedescendant');
+                        if (act) {
+                            const opt = document.getElementById(act);
+                            if (opt) {
+                                const lb = opt.closest('[role="listbox"],[role="tree"],[role="menu"]');
+                                if (lb && isVisible(lb)) return lb;
+                            }
+                        }
+                        
+                        // 3) Find nearest visible listbox
+                        const listboxes = Array.from(document.querySelectorAll('[role="listbox"],[role="tree"],[role="menu"]'))
+                            .filter(isVisible);
+                            
+                        if (listboxes.length === 1) return listboxes[0]; // Common portal case
+                        
+                        // 4) Pick closest by screen distance
+                        const cb = combo.getBoundingClientRect();
+                        let best = null, bestDist = Infinity;
+                        for (const lb of listboxes) {
+                            const r = lb.getBoundingClientRect();
+                            const dx = Math.max(0, Math.max(r.left - cb.right, cb.left - r.right));
+                            const dy = Math.max(0, Math.max(r.top - cb.bottom, cb.top - r.bottom));
+                            const d = dx*dx + dy*dy;
+                            if (d < bestDist) { best = lb; bestDist = d; }
+                        }
+                        return best;
+                    }
+                    
+                    function readOptionsFromPopup(popup) {
+                        if (!popup) return [];
+                        const clean = s => (s ?? '').replace(/\\s+/g, ' ').trim();
+                        const opts = [];
+                        const candidates = popup.querySelectorAll('[role="option"],[role="treeitem"],[role="menuitem"],option');
+                        
+                        for (const el of candidates) {
+                            const value = el.getAttribute('data-value') || el.getAttribute('value') || clean(el.textContent || '');
+                            const label = clean(el.getAttribute('aria-label') || el.getAttribute('label') || el.textContent || '');
+                            if (label || value) {
+                                opts.push({ label: label || value, value: value || label });
+                            }
+                        }
+                        
+                        // Return a new array with new objects to avoid reference reuse
+                        return opts.map(o => ({ label: o.label, value: o.value }));
+                    }
+                    
+                    // Get the popup specific to this combobox
+                    const popup = getPopupForCombobox(combobox);
+                    return readOptionsFromPopup(popup);
+                }
+                """)
+            except Exception as e:
+                print(f"Error extracting combobox options: {e}")
+                opts = []
+            
+            # Try closing the popup
             try:
-                frame.page.keyboard.press("Escape")
+                cb.press("Escape")
+                time.sleep(0.1)
             except Exception:
                 pass
+            
             fields.append({"kind": "combobox", "question": q, "options": opts, "required": False, "source": "technical"})
         except Exception:
             continue

@@ -15,6 +15,7 @@ Writes:
 """
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,6 +28,9 @@ EXISTING_FILLED = OutputPaths.FILLED_ANSWERS         # optional
 PREVIOUS_COMPLETED = OutputPaths.USER_COMPLETED_ANSWERS   # optional; reused/updated
 OUTPUT_ANSWERS = OutputPaths.USER_COMPLETED_ANSWERS
 STILL_SKIPPED = OutputPaths.STILL_SKIPPED
+
+# Configuration
+SKIP_INTERACTIVE_REVIEW = False   # Set to True to skip the final review/modification mode
 # ====================================================================
 
 # ----------------------- Schema Normalization -----------------------
@@ -46,6 +50,21 @@ class NormalizedField:
 def load_json(path: str) -> Any:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+def load_previously_answered():
+    """Load previously answered questions to avoid duplicates"""
+    cache_path = os.path.join(OutputPaths.DATA_DIR, "answered_questions_cache.json")
+    if os.path.exists(cache_path):
+        with open(cache_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_previously_answered(answers_dict):
+    """Save answered questions to avoid asking again"""
+    cache_path = os.path.join(OutputPaths.DATA_DIR, "answered_questions_cache.json")
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    with open(cache_path, "w", encoding="utf-8") as f:
+        json.dump(answers_dict, f, indent=2)
 
 def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
     out: List[NormalizedField] = []
@@ -125,7 +144,9 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
             rtype = "text"
         elif rtype in ["textarea", "longtext"]:
             rtype = "textarea"
-        elif rtype not in ["text", "textarea", "select", "multiselect", "radio", "unknown"]:
+        elif rtype in ["file", "upload", "file_upload", "resume_upload"]:
+            rtype = "file"
+        elif rtype not in ["text", "textarea", "select", "multiselect", "radio", "file", "unknown"]:
             rtype = "unknown"
 
         if fid and question:
@@ -169,6 +190,35 @@ def ask_for_field(field: NormalizedField) -> Tuple[bool, Any]:
     print("\n" + "="*70)
     print(f"Field: {field.question}")
     print(f"ID: {field.id}")
+
+    # Special handling for file uploads
+    if field.type == "file":
+        # Check if this is a resume/CV field and if the resume file exists
+        if "resume" in field.id.lower() or "cv" in field.id.lower() or "resume" in field.question.lower() or "cv" in field.question.lower():
+            resume_paths = ["./data/Geetansh_resume.pdf", "./data/resume.pdf", "./data/resume.txt", "data/Geetansh_resume.pdf", "data/resume.pdf", "data/resume.txt"]
+            existing_resume = None
+            for path in resume_paths:
+                if os.path.exists(path):
+                    existing_resume = path
+                    break
+            
+            if existing_resume:
+                print(f"📄 Auto-detected resume file: {existing_resume}")
+                print("✅ Using existing resume file for upload")
+                return (True, existing_resume)
+            else:
+                print("📄 This appears to be a resume/CV upload field.")
+                print("   Resume file not found in ./data/ directory.")
+                print("   The form filling script will handle the upload automatically.")
+                print("   Marking as completed with placeholder.")
+                return (True, "RESUME_FILE_UPLOAD")
+        else:
+            print("📁 This is a file upload field.")
+            print("   Please specify the file path, or press Enter to skip.")
+            raw = input("> ").strip()
+            if not raw:
+                return (False, None)
+            return (True, raw)
 
     if field.options:
         labels = [o.label for o in field.options]
@@ -281,6 +331,8 @@ def interactive_review_all_answers(wrapped_answers: Dict[str, Dict[str, Any]],
             print(f"    → {answer}")
             print()
         print("-" * 60)
+    else:
+        print("✅ Skipping review as requested.")
     
     # Now allow modifications
     modified_answers = dict(wrapped_answers)  # Copy to modify
@@ -448,11 +500,15 @@ def main():
         q = f.question if f else "(question text not found in form)"
         wrapped_output[fid] = {"question": q, "answer": val}
 
-    # Interactive review of ALL answers
-    print("\n" + "="*60)
-    print("📋 FINAL REVIEW - Check all your answers before form filling")
-    print("="*60)
-    final_answers = interactive_review_all_answers(wrapped_output, field_map)
+    # Interactive review of ALL answers (optional)
+    if SKIP_INTERACTIVE_REVIEW:
+        print("\n✅ Skipping interactive review (auto-mode enabled)")
+        final_answers = wrapped_output
+    else:
+        print("\n" + "="*60)
+        print("📋 FINAL REVIEW - Check all your answers before form filling")
+        print("="*60)
+        final_answers = interactive_review_all_answers(wrapped_output, field_map)
     
     with open(OUTPUT_ANSWERS, "w", encoding="utf-8") as f:
         json.dump(final_answers, f, ensure_ascii=False, indent=2)

@@ -22,7 +22,7 @@ Requirements:
     - All pipeline scripts (a1-a7) must be in the same directory
     - Virtual environment with all dependencies installed
     - .env file with GEMINI_API_KEY
-    - Resume file at ./data/resume.pdf
+    - Resume file at ./data/Geetansh_resume.pdf
     - Supplemental context at ./Supplemental-context.json (optional)
 """
 
@@ -30,18 +30,27 @@ import subprocess
 import sys
 import os
 import json
-import argparse
 from pathlib import Path
 from typing import Optional, Dict, Any
 import tempfile
 import shutil
 from datetime import datetime
 
+# Import comprehensive warning suppression
+try:
+    from warning_suppressor import *
+except ImportError:
+    # Fallback suppression
+    os.environ['GRPC_VERBOSITY'] = 'ERROR'
+    os.environ['GRPC_TRACE'] = ''
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    os.environ['GOOGLE_CLOUD_DISABLE_GRPC_FOR_REST'] = 'true'
+
 from output_config import OutputPaths, ensure_output_dirs, OUTPUT_BASE
 
 class PipelineRunner:
-    def __init__(self, job_url: str, resume_path: str = "./data/resume.pdf", 
-                 headless: bool = False, auto_submit: bool = False):
+    def __init__(self, job_url: str, resume_path: str = "./data/Geetansh_resume.pdf", 
+                 headless: bool = True, auto_submit: bool = False):
         self.job_url = job_url
         self.resume_path = Path(resume_path)
         self.headless = headless
@@ -346,62 +355,29 @@ class PipelineRunner:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Complete Job Application Pipeline Runner",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-    # Run with custom URL
-    python pipeline_runner.py --url "https://company.com/job/12345"
+    """
+    Hardcoded configuration - edit these values as needed:
+    """
+    # ========== CONFIGURATION ==========
+    job_url = "https://job-boards.greenhouse.io/hackerrank/jobs/7211528?gh_jid=7211528&gh_src=1836e8621us"
+    resume_path = "./data/Geetansh_resume.pdf"
+    headless_mode = True   # Set to False to see browser GUI
+    auto_submit = False   # Set to True to auto-submit without confirmation
+    # ===================================
     
-    # Run headless with auto-submit
-    python pipeline_runner.py --url "https://company.com/job/12345" --headless --auto-submit
-    
-    # Use custom resume
-    python pipeline_runner.py --url "https://company.com/job/12345" --resume "/path/to/resume.pdf"
-        """
-    )
-    
-    parser.add_argument(
-        "--url",
-        type=str,
-        help="Job application URL to process"
-    )
-    
-    parser.add_argument(
-        "--resume", 
-        type=str,
-        default="./data/resume.pdf",
-        help="Path to resume PDF file (default: ./data/resume.pdf)"
-    )
-    
-    parser.add_argument(
-        "--headless",
-        action="store_true",
-        help="Run browser in headless mode (no GUI)"
-    )
-    
-    parser.add_argument(
-        "--auto-submit",
-        action="store_true", 
-        help="Auto-submit form without user approval"
-    )
-    
-    args = parser.parse_args()
-    
-    # Use provided URL or default
-    job_url = args.url or "https://job-boards.greenhouse.io/gomotive/jobs/8137073002?gh_src=my.greenhouse.search"
-    
-    if not job_url:
-        print("❌ Error: Job URL is required. Use --url parameter or set it in the script.")
-        sys.exit(1)
+    print("🚀 Starting Job Application Pipeline")
+    print(f"📋 Job URL: {job_url}")
+    print(f"📄 Resume: {resume_path}")
+    print(f"🖥️  Headless Mode: {headless_mode}")
+    print(f"⚡ Auto Submit: {auto_submit}")
+    print("=" * 60)
     
     # Create and run pipeline
     pipeline = PipelineRunner(
         job_url=job_url,
-        resume_path=args.resume,
-        headless=args.headless,
-        auto_submit=args.auto_submit
+        resume_path=resume_path,
+        headless=headless_mode,
+        auto_submit=auto_submit
     )
     
     success = pipeline.run_pipeline()

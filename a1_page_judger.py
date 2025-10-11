@@ -33,8 +33,8 @@ from output_config import OutputPaths
 # =========================
 # HARD-CODED CONFIG (edit)
 # =========================
-START_URL = "https://job-boards.greenhouse.io/gomotive/jobs/8137073002?gh_src=my.greenhouse.search"  # <-- put the landing/listing URL here
-HEADLESS = False                                     # True for headless browser
+START_URL = "https://job-boards.greenhouse.io/hackerrank/jobs/7211528?gh_jid=7211528&gh_src=1836e8621us"  # <-- put the landing/listing URL here
+HEADLESS = False                                   # True for headless browser
 SLOW_MO_MS = 300                                     # Slow-mo for debugging (0 for speed)
 GENERATE_COVER = True                                # Call your generator on the landing page
 TIMEOUT_MS = 15000                                   # Default Playwright timeout
@@ -49,8 +49,8 @@ OUT_REACHED = OutputPaths.FORM_PAGE_REACHED
 # Heuristics for "Apply" buttons/links
 APPLY_SELECTORS = [
     # Role-based (preferred)
-    "role=button[name=/apply|submit|start application/i]",
-    "role=link[name=/apply|submit|start application/i]",
+    "role=button[name=/apply|submit|start application|join|careers/i]",
+    "role=link[name=/apply|submit|start application|join|careers/i]",
     # Text-based
     "button:has-text('Apply')",
     "a:has-text('Apply')",
@@ -62,9 +62,25 @@ APPLY_SELECTORS = [
     "a:has-text('Start application')",
     "button:has-text('Submit application')",
     "a:has-text('Submit application')",
+    "button:has-text('Join')",
+    "a:has-text('Join')",
+    "button:has-text('Join us')",
+    "a:has-text('Join us')",
+    "button:has-text('Join our team')",
+    "a:has-text('Join our team')",
+    "button:has-text('Get started')",
+    "a:has-text('Get started')",
+    "button:has-text('Contact')",
+    "a:has-text('Contact')",
+    "button:has-text('Contact us')",
+    "a:has-text('Contact us')",
     # Class hints
     "a[class*='apply']",
     "button[class*='apply']",
+    "a[class*='join']",
+    "button[class*='join']",
+    "a[class*='contact']",
+    "button[class*='contact']",
 ]
 
 # Known ATS domains (best-effort)
@@ -116,7 +132,7 @@ def _page_has_form_controls(page) -> Tuple[bool, Optional[str]]:
     try:
         # 1) Top-level
         top_count = _count_form_controls(page)
-        if top_count >= 4:  # heuristic threshold
+        if top_count >= 2:  # lowered threshold from 4 to 2
             return True, page.url
         # 2) Iframes
         for fr in page.frames:
@@ -124,8 +140,22 @@ def _page_has_form_controls(page) -> Tuple[bool, Optional[str]]:
                 if fr == page.main_frame:
                     continue
                 c = _count_form_controls(fr)
-                if c >= 4:
+                if c >= 2:  # lowered threshold from 4 to 2
                     return True, fr.url
+            except Exception:
+                continue
+        # 3) Fallback: check for any form elements or contact-like content
+        if top_count > 0:  # any form controls at all
+            return True, page.url
+        # Check for common contact/application form indicators
+        form_indicators = [
+            "form", "[action]", "input[type='email']", "input[name*='email']",
+            "input[name*='name']", "textarea", "select"
+        ]
+        for indicator in form_indicators:
+            try:
+                if page.locator(indicator).count() > 0:
+                    return True, page.url
             except Exception:
                 continue
     except Exception:
@@ -186,7 +216,7 @@ def _maybe_generate_cover_and_summary(landing_url: str, enable: bool) -> Optiona
         return None
     try:
         import cover_letter_and_summary as genmod  # your module
-        resume_path = os.getenv("RESUME_FILE", "") or str(Path("data") / "resume.pdf")
+        resume_path = os.getenv("RESUME_FILE", "") or str(Path("data") / "Geetansh_resume.pdf")
         resume_path = str(Path(resume_path).expanduser())
         if not Path(resume_path).exists():
             print(f"⚠️  Resume not found at {resume_path}. Set RESUME_FILE for better results.")
@@ -311,6 +341,27 @@ def judge(start_url: str, headless: bool, slow_mo_ms: int, generate_cover: bool)
                     steps.append(StepRecord(action="detect_form_after_click", url_before=page.url, url_after=page.url,
                                             note="Form controls present"))
                     break
+
+        # Fallback: if no form was detected but we have basic web content, assume current page is the form
+        if not final_url:
+            try:
+                # Check for basic webpage indicators that suggest this could be an application page
+                basic_indicators = [
+                    "input", "button", "form", "textarea", "select", 
+                    "[type='email']", "[type='text']", "a[href*='mailto']"
+                ]
+                has_basic_elements = False
+                for indicator in basic_indicators:
+                    if page.locator(indicator).count() > 0:
+                        has_basic_elements = True
+                        break
+                
+                if has_basic_elements:
+                    final_url = page.url
+                    steps.append(StepRecord(action="fallback_assume_form", url_before=page.url, url_after=page.url,
+                                          note="Assuming current page is form page (fallback)"))
+            except Exception as e:
+                errors.append(f"Fallback check error: {e}")
 
         provider = _classify_ats(final_url or page.url)
         status = "form_found" if final_url else "apply_missing_or_failed"
