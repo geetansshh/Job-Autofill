@@ -15,6 +15,7 @@ Outputs: form_fields_enhanced.json with complete field list
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from pathlib import Path
 import json, re, time, os
+from dotenv import load_dotenv
 
 # Suppress Google API/GRPC warnings
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
@@ -26,9 +27,9 @@ import google.generativeai as genai
 from output_config import OutputPaths
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
-
-# Configuration
-JOB_URL = "https://job-boards.greenhouse.io/hackerrank/jobs/7211528?gh_jid=7211528&gh_src=1836e8621us"
+load_dotenv()
+# Configuration - Read from environment variables for pipeline integration
+JOB_URL = os.getenv("JOB_URL", "https://job-boards.greenhouse.io/hackerrank/jobs/7211528?gh_jid=7211528&gh_src=1836e8621us")
 OUT_FILE = OutputPaths.FORM_FIELDS_ENHANCED
 MODEL_NAME = "gemini-2.5-flash-lite"
 
@@ -441,9 +442,9 @@ def extract_page_markdown(page):
 
 def setup_gemini():
     """Setup Gemini API"""
-    api_key = "AIzaSyAJrmvM10sV7GxgzAwApFtGtR3ht6l3fY0"  # Your API key
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY not found")
+        raise RuntimeError("GEMINI_API_KEY not found in environment")
     genai.configure(api_key=api_key)
     return genai.GenerativeModel(MODEL_NAME)
 

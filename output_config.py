@@ -6,6 +6,7 @@ All scripts import from this file to ensure consistent output paths.
 """
 
 from pathlib import Path
+import os
 
 # Base output directory
 OUTPUT_BASE = Path("outputs")
@@ -16,6 +17,40 @@ OUTPUT_DOCUMENTS = OUTPUT_BASE / "documents"
 OUTPUT_SCREENSHOTS = OUTPUT_BASE / "screenshots"
 OUTPUT_VIDEOS = OUTPUT_BASE / "videos"
 OUTPUT_LOGS = OUTPUT_BASE / "logs"
+
+# Data directory
+DATA_DIR = Path("data")
+
+# Resume configuration - SINGLE SOURCE OF TRUTH
+def get_resume_path() -> Path:
+    """
+    Get resume path with proper fallback chain:
+    1. RESUME_FILE environment variable (highest priority)
+    2. RESUME_PATH environment variable  
+    3. Default: data/Geetansh_resume.pdf
+    
+    Returns resolved, expanded Path object.
+    """
+    # Check RESUME_FILE first (used by a7_fill_form_resume.py)
+    resume_file = os.getenv("RESUME_FILE")
+    if resume_file:
+        path = Path(resume_file).expanduser().resolve()
+        if path.exists():
+            return path
+    
+    # Check RESUME_PATH (used by a3_cover_letter_and_summary.py)
+    resume_path = os.getenv("RESUME_PATH")
+    if resume_path:
+        path = Path(resume_path).expanduser().resolve()
+        if path.exists():
+            return path
+    
+    # Default fallback
+    path = (DATA_DIR / "Geetansh_resume.pdf").resolve()
+    return path
+
+# Resume path constant
+RESUME_PATH = get_resume_path()
 
 # Ensure all directories exist
 def ensure_output_dirs():

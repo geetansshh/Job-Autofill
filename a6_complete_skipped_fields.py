@@ -10,23 +10,32 @@ Reads:
   - PREVIOUS_COMPLETED      prior interactive output: {id:{question,answer}} (optional)
 
 Writes:
-  - OUTPUT_ANSWERS          merged interactive output: {id:{question,answer}}
+import logging
+from output_config import OutputPaths
+from utils import ci_match_label, normalize
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
   - STILL_SKIPPED           any you left blank in this run
 """
 
+
+
 import json
 import os
-import re
+import logging
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
 from output_config import OutputPaths
 
-# ========================= HARD-CODED PATHS (now centralized) =========================
-FORM_PATH = OutputPaths.FORM_FIELDS_ENHANCED        # Note: using cleaned form fields
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+
+# Simple input wrapper (can be replaced with Telegram bot input if needed)
+telegram_input = input
+
+FORM_PATH = OutputPaths.FORM_FIELDS_ENHANCED
 SKIPPED_PATH = OutputPaths.SKIPPED_FIELDS
-EXISTING_FILLED = OutputPaths.FILLED_ANSWERS         # optional
-PREVIOUS_COMPLETED = OutputPaths.USER_COMPLETED_ANSWERS   # optional; reused/updated
-OUTPUT_ANSWERS = OutputPaths.USER_COMPLETED_ANSWERS
+EXISTING_FILLED = OutputPaths.FILLED_ANSWERS
+# SIMPLIFIED: Just append to filled_answers.json - no separate file!
+OUTPUT_ANSWERS = OutputPaths.FILLED_ANSWERS  # Write back to same file
 STILL_SKIPPED = OutputPaths.STILL_SKIPPED
 
 # Configuration
@@ -35,6 +44,8 @@ SKIP_INTERACTIVE_REVIEW = False   # Set to True to skip the final review/modific
 
 # ----------------------- Schema Normalization -----------------------
 
+
+# ----------------------- Schema Normalization -----------------------
 @dataclass
 class NormalizedOption:
     label: str
@@ -43,53 +54,34 @@ class NormalizedOption:
 class NormalizedField:
     id: str
     question: str
-    type: str               # text|textarea|select|multiselect|checkbox|radio|unknown
+    type: str
     options: List[NormalizedOption]
-    allows_multiple: bool
+    allows_multiple: bool = False
 
 def load_json(path: str) -> Any:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def load_previously_answered():
-    """Load previously answered questions to avoid duplicates"""
-    cache_path = os.path.join(OutputPaths.DATA_DIR, "answered_questions_cache.json")
-    if os.path.exists(cache_path):
-        with open(cache_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-def save_previously_answered(answers_dict):
-    """Save answered questions to avoid asking again"""
-    cache_path = os.path.join(OutputPaths.DATA_DIR, "answered_questions_cache.json")
-    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-    with open(cache_path, "w", encoding="utf-8") as f:
-        json.dump(answers_dict, f, indent=2)
-
-def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
+def normalize_fields(form: Any) -> List[NormalizedField]:
+    """
+    Normalize form fields from various possible structures into a list of NormalizedField.
+    """
     out: List[NormalizedField] = []
-
     possible_lists = []
     if isinstance(form, dict):
-        for key in ["fields", "questions", "items", "schema", "formFields"]:
-            if key in form and isinstance(form[key], list):
-                possible_lists.append(form[key])
-        if not possible_lists and isinstance(form.get("form"), list):
-            possible_lists.append(form["form"])
+        for k, v in form.items():
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                possible_lists.append(v)
     elif isinstance(form, list):
         possible_lists.append(form)
-
     if not possible_lists:
         raise ValueError("Could not find a list of fields in provided form JSON.")
-
     fields_list = max(possible_lists, key=len)
-
     for raw in fields_list:
         if not isinstance(raw, dict):
             continue
-
         fid = str(
-            raw.get("question_id")  # Primary field for our form structure
+            raw.get("question_id")
             or raw.get("id")
             or raw.get("field_id")
             or raw.get("name")
@@ -98,7 +90,6 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
             or raw.get("uid")
             or ""
         ).strip()
-
         question = str(
             raw.get("question")
             or raw.get("label")
@@ -107,9 +98,7 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
             or raw.get("title")
             or ""
         ).strip()
-
         rtype = (raw.get("input_type") or raw.get("type") or raw.get("kind") or raw.get("component") or "unknown").lower()
-
         allows_multiple = False
         multi_flags = [
             raw.get("multiple"),
@@ -120,7 +109,6 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
         allows_multiple = any(bool(x) for x in multi_flags if x is not None)
         if any(t in rtype for t in ["checkbox", "multi", "chips"]):
             allows_multiple = True
-
         options_raw = raw.get("options") or raw.get("choices") or []
         options: List[NormalizedOption] = []
         if isinstance(options_raw, list):
@@ -131,7 +119,6 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
                     label = str(opt).strip()
                 if label:
                     options.append(NormalizedOption(label=label))
-
         # coerce type
         if rtype in ["select", "dropdown", "combo", "combobox"]:
             rtype = "select"
@@ -148,7 +135,6 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
             rtype = "file"
         elif rtype not in ["text", "textarea", "select", "multiselect", "radio", "file", "unknown"]:
             rtype = "unknown"
-
         if fid and question:
             out.append(NormalizedField(
                 id=fid,
@@ -157,7 +143,6 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
                 options=options,
                 allows_multiple=allows_multiple
             ))
-
     if not out:
         raise ValueError("No valid fields with id and question found.")
     return out
@@ -187,74 +172,69 @@ def parse_selection(input_str: str, labels: List[str]) -> List[str]:
     return chosen
 
 def ask_for_field(field: NormalizedField) -> Tuple[bool, Any]:
-    print("\n" + "="*70)
-    print(f"Field: {field.question}")
-    print(f"ID: {field.id}")
+    logging.info("\n" + "="*70)
+    logging.info(f"Field: {field.question}")
+    logging.info(f"ID: {field.id}")
 
     # Special handling for file uploads
     if field.type == "file":
-        # Check if this is a resume/CV field and if the resume file exists
+        # Check if this is a resume/CV field
         if "resume" in field.id.lower() or "cv" in field.id.lower() or "resume" in field.question.lower() or "cv" in field.question.lower():
-            resume_paths = ["./data/Geetansh_resume.pdf", "./data/resume.pdf", "./data/resume.txt", "data/Geetansh_resume.pdf", "data/resume.pdf", "data/resume.txt"]
-            existing_resume = None
-            for path in resume_paths:
-                if os.path.exists(path):
-                    existing_resume = path
-                    break
+            from output_config import RESUME_PATH
             
-            if existing_resume:
-                print(f"📄 Auto-detected resume file: {existing_resume}")
-                print("✅ Using existing resume file for upload")
-                return (True, existing_resume)
+            if RESUME_PATH.exists():
+                logging.info(f"Auto-detected resume file: {RESUME_PATH}")
+                logging.info("Using existing resume file for upload")
+                return (True, str(RESUME_PATH))
             else:
-                print("📄 This appears to be a resume/CV upload field.")
-                print("   Resume file not found in ./data/ directory.")
-                print("   The form filling script will handle the upload automatically.")
-                print("   Marking as completed with placeholder.")
+                logging.info("This appears to be a resume/CV upload field.")
+                logging.info(f"Resume file not found at: {RESUME_PATH}")
+                logging.info("The form filling script will handle the upload automatically.")
+                logging.info("Marking as completed with placeholder.")
                 return (True, "RESUME_FILE_UPLOAD")
         else:
-            print("📁 This is a file upload field.")
-            print("   Please specify the file path, or press Enter to skip.")
-            raw = input("> ").strip()
+            logging.info("This is a file upload field.")
+            logging.info("Please specify the file path, or press Enter to skip.")
+            raw = telegram_input("> ").strip()
             if not raw:
                 return (False, None)
             return (True, raw)
 
     if field.options:
         labels = [o.label for o in field.options]
-        print("\nOptions:")
+        logging.info("\nOptions:")
         for i, lab in enumerate(labels, start=1):
-            print(f"  {i}. {lab}")
+            logging.info(f"  {i}. {lab}")
 
         if field.allows_multiple:
-            print("\nSelect one or more options (comma-separated indices or labels).")
-            print("Press Enter to skip.")
-            raw = input("> ").strip()
+            logging.info("Select one or more options (comma-separated indices or labels).")
+            logging.info("Press Enter to skip.")
+            raw = telegram_input("> ").strip()
             if not raw:
                 return (False, None)
             chosen = parse_selection(raw, labels)
             if chosen:
                 return (True, chosen)
             else:
-                print("No valid options recognized. Skipping this field.")
+                logging.warning("No valid options recognized. Skipping this field.")
                 return (False, None)
         else:
-            print("\nSelect ONE option (enter index or label). Press Enter to skip.")
-            raw = input("> ").strip()
+            logging.info("Select ONE option (enter index or label). Press Enter to skip.")
+            raw = telegram_input("> ").strip()
             if not raw:
                 return (False, None)
             chosen = parse_selection(raw, labels)
             if len(chosen) == 1:
                 return (True, chosen[0])
             elif len(chosen) > 1:
-                print("Multiple choices detected; expecting only one. Skipping this field.")
+                logging.warning("Multiple choices detected; expecting only one. Skipping this field.")
                 return (False, None)
             else:
-                print("No valid option recognized. Skipping this field.")
+                logging.warning("No valid option recognized. Skipping this field.")
                 return (False, None)
     else:
-        print("\nType your answer (free text). Press Enter to skip.")
-        raw = input("> ").strip()
+        logging.info("Type your answer (free text). Press Enter to skip.")
+        raw = telegram_input("> ").strip()
         if not raw:
             return (False, None)
         return (True, raw)
@@ -315,7 +295,7 @@ def interactive_review_all_answers(wrapped_answers: Dict[str, Dict[str, Any]],
     
     # First, ask if they want to review all answers
     try:
-        review_mode = input("Would you like to review all answers first? [y/N]: ").strip().lower()
+        review_mode = telegram_input("Would you like to review all answers first? [y/N]: ").strip().lower()
         show_all_first = review_mode in ('y', 'yes', 'review')
     except EOFError:
         show_all_first = False
@@ -358,7 +338,7 @@ def interactive_review_all_answers(wrapped_answers: Dict[str, Dict[str, Any]],
                     marker = "→" if opt.label == current_answer else " "
                     print(f"  {marker} {j}. {opt.label}")
                 
-                user_input = input("Keep current (Enter) or choose number/type new answer: ").strip()
+                user_input = telegram_input("Keep current (Enter) or choose number/type new answer: ").strip()
                 
                 if user_input == "":
                     # Keep current answer
@@ -398,7 +378,7 @@ def interactive_review_all_answers(wrapped_answers: Dict[str, Dict[str, Any]],
                     print(f"  ✅ Changed to: {user_input}")
             else:
                 # Text field - just ask for new value
-                user_input = input("Keep current (Enter) or type new answer: ").strip()
+                user_input = telegram_input("Keep current (Enter) or type new answer: ").strip()
                 
                 if user_input != "":
                     modified_answers[field_id]["answer"] = user_input
@@ -436,33 +416,44 @@ def main():
         raise ValueError("skipped_fields.json must be a list.")
     skipped_list = dedup_skipped_by_id(skipped_list)
 
-    # Load existing autofill answers (optional)
+    # Load existing autofill answers (optional) - Handles BOTH formats!
     try:
-        existing_filled = load_json(EXISTING_FILLED)  # { id: value }
-        if not isinstance(existing_filled, dict):
-            existing_filled = {}
-    except Exception:
+        existing_filled_raw = load_json(EXISTING_FILLED)
+        if not isinstance(existing_filled_raw, dict):
+            existing_filled_raw = {}
+        
+        # Check format: if first value is a dict with "answer", it's wrapped
+        # Otherwise it's flat format { id: value }
+        existing_filled = {}
+        for fid, val in existing_filled_raw.items():
+            if isinstance(val, dict) and "answer" in val:
+                # Wrapped format: { id: {question, answer} }
+                existing_filled[fid] = val["answer"]
+            else:
+                # Flat format: { id: value }
+                existing_filled[fid] = val
+    except Exception as e:
+        logging.warning(f"Could not load existing filled answers: {e}")
         existing_filled = {}
 
-    # Load previous interactive output (optional)
-    try:
-        prev_completed_wrapped = load_json(PREVIOUS_COMPLETED)  # { id: {question, answer} }
-        if not isinstance(prev_completed_wrapped, dict):
-            prev_completed_wrapped = {}
-    except Exception:
-        prev_completed_wrapped = {}
-    previous_values = unwrap_previous_completed(prev_completed_wrapped)
+    # Load previous interactive output (optional) - no longer needed since we write to same file
+    prev_completed_wrapped = {}
+    previous_values = {}
 
-    # Known answers so we DON'T ASK again
+    # Known answers so we DON'T ASK again - MERGE existing + previous
     known_answers: Dict[str, Any] = dict(existing_filled)
     known_answers.update(previous_values)
+    
+    logging.info(f"📋 Loaded {len(existing_filled)} answers from filled_answers.json")
+    logging.info(f"📋 Loaded {len(previous_values)} answers from previous user_completed_answers.json")
+    logging.info(f"📋 Total known answers: {len(known_answers)}")
 
     new_values: Dict[str, Any] = {}
     still_skipped: List[Dict[str, Any]] = []
     asked_ids = set()
 
-    print("\n== Interactive completion for skipped fields (ask-once) ==")
-    print("Tip: Press Enter on any prompt to skip that field.\n")
+    logging.info("\n== Interactive completion for skipped fields (ask-once) ==")
+    logging.info("Tip: Press Enter on any prompt to skip that field.\n")
 
     for s in skipped_list:
         fid = s.get("id")
@@ -480,7 +471,7 @@ def main():
 
         f = field_map.get(fid)
         if not f:
-            print(f"\n[WARN] Field metadata not found for id={fid!r}. Skipping.")
+            logging.warning(f"Field metadata not found for id={fid!r}. Skipping.")
             still_skipped.append({"id": fid, "question": s.get("question") or "", "reason": "field metadata not found"})
             continue
 
@@ -490,34 +481,45 @@ def main():
         else:
             still_skipped.append({"id": fid, "question": f.question, "reason": s.get("reason") or "user skipped"})
 
-    # Merge and wrap output
+    # Merge and save as FLAT format (no wrapping) to match filled_answers.json
     merged_values: Dict[str, Any] = dict(known_answers)
     merged_values.update(new_values)
 
-    wrapped_output: Dict[str, Dict[str, Any]] = {}
-    for fid, val in merged_values.items():
-        f = field_map.get(fid)
-        q = f.question if f else "(question text not found in form)"
-        wrapped_output[fid] = {"question": q, "answer": val}
-
     # Interactive review of ALL answers (optional)
     if SKIP_INTERACTIVE_REVIEW:
-        print("\n✅ Skipping interactive review (auto-mode enabled)")
-        final_answers = wrapped_output
+        logging.info("\n✅ Skipping interactive review (auto-mode enabled)")
+        final_answers = merged_values
     else:
-        print("\n" + "="*60)
-        print("📋 FINAL REVIEW - Check all your answers before form filling")
-        print("="*60)
-        final_answers = interactive_review_all_answers(wrapped_output, field_map)
+        # Wrap for review, then unwrap for saving
+        wrapped_for_review: Dict[str, Dict[str, Any]] = {}
+        for fid, val in merged_values.items():
+            f = field_map.get(fid)
+            q = f.question if f else "(question text not found in form)"
+            wrapped_for_review[fid] = {"question": q, "answer": val}
+        
+        logging.info("\n" + "="*60)
+        logging.info("FINAL REVIEW - Check all your answers before form filling")
+        logging.info("="*60)
+        reviewed = interactive_review_all_answers(wrapped_for_review, field_map)
+        
+        # Unwrap after review to get flat format
+        final_answers = {}
+        for fid, bundle in reviewed.items():
+            if isinstance(bundle, dict) and "answer" in bundle:
+                final_answers[fid] = bundle["answer"]
+            else:
+                final_answers[fid] = bundle
     
+    # Save in FLAT format: { id: value } - same as filled_answers.json!
     with open(OUTPUT_ANSWERS, "w", encoding="utf-8") as f:
         json.dump(final_answers, f, ensure_ascii=False, indent=2)
     with open(STILL_SKIPPED, "w", encoding="utf-8") as f:
         json.dump(still_skipped, f, ensure_ascii=False, indent=2)
 
-    print("\nDone.")
-    print(f"Saved merged answers → {OUTPUT_ANSWERS}")
-    print(f"Remaining skipped   → {STILL_SKIPPED}")
+    logging.info("\nDone.")
+    logging.info(f"✅ Saved {len(final_answers)} answers → {OUTPUT_ANSWERS}")
+    logging.info(f"   (This is the file a7 will use to fill the form!)")
+    logging.info(f"Remaining skipped   → {STILL_SKIPPED}")
 
 if __name__ == "__main__":
     main()

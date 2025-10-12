@@ -4,8 +4,8 @@
     "notice_period_days": 0,
     "work_authorization": {
       "country": "India",
-      "has_valid_permit": true,
-      "requires_sponsorship": false
+      "has_valid_permit": "Yes",
+      "requires_sponsorship": "No"
     },
     "preferred_locations_ordered": [
       "Bengaluru (Bangalore)",
@@ -13,7 +13,7 @@
       "Hyderabad",
       "Delhi NCR (Gurgaon)"
     ],
-    "willing_to_relocate": true,
+    "willing_to_relocate":"Yes",
     "Country_code":"+91"
   }
   

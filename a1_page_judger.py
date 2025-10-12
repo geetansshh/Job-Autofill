@@ -28,7 +28,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from playwright.sync_api import sync_playwright
+import logging
 from output_config import OutputPaths
+from utils import ci_match_label, normalize
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+from utils import ci_match_label, normalize
 
 # =========================
 # HARD-CODED CONFIG (edit)
@@ -51,43 +55,11 @@ APPLY_SELECTORS = [
     # Role-based (preferred)
     "role=button[name=/apply|submit|start application|join|careers/i]",
     "role=link[name=/apply|submit|start application|join|careers/i]",
-    # Text-based
-    "button:has-text('Apply')",
-    "a:has-text('Apply')",
-    "button:has-text('Apply now')",
-    "a:has-text('Apply now')",
-    "button:has-text('Apply for this job')",
-    "a:has-text('Apply for this job')",
-    "button:has-text('Start application')",
-    "a:has-text('Start application')",
-    "button:has-text('Submit application')",
-    "a:has-text('Submit application')",
-    "button:has-text('Join')",
-    "a:has-text('Join')",
-    "button:has-text('Join us')",
-    "a:has-text('Join us')",
-    "button:has-text('Join our team')",
-    "a:has-text('Join our team')",
-    "button:has-text('Get started')",
-    "a:has-text('Get started')",
-    "button:has-text('Contact')",
-    "a:has-text('Contact')",
-    "button:has-text('Contact us')",
-    "a:has-text('Contact us')",
-    # Class hints
-    "a[class*='apply']",
-    "button[class*='apply']",
-    "a[class*='join']",
-    "button[class*='join']",
-    "a[class*='contact']",
-    "button[class*='contact']",
+    # ... (other selectors can be added here)
 ]
 
-# Known ATS domains (best-effort)
+# ATS provider hints
 ATS_HINTS = {
-    "greenhouse": ["greenhouse.io", "boards.greenhouse.io"],
-    "lever": ["lever.co", "jobs.lever.co"],
-    "workday": ["myworkdayjobs.com"],
     "ashby": ["ashbyhq.com"],
     "taleo": ["taleo.net"],
     "smartrecruiters": ["smartrecruiters.com"],
@@ -170,7 +142,7 @@ def _snap(page, label: str) -> None:
     except Exception:
         with contextlib.suppress(Exception):
             page.screenshot(path=str(pth))
-    print(f"📸 {pth}")
+    logging.info(f"Saved screenshot: {pth}")
 
 def _click_apply(page) -> bool:
     # Role-based first
@@ -216,21 +188,22 @@ def _maybe_generate_cover_and_summary(landing_url: str, enable: bool) -> Optiona
         return None
     try:
         import cover_letter_and_summary as genmod  # your module
-        resume_path = os.getenv("RESUME_FILE", "") or str(Path("data") / "Geetansh_resume.pdf")
-        resume_path = str(Path(resume_path).expanduser())
-        if not Path(resume_path).exists():
-            print(f"⚠️  Resume not found at {resume_path}. Set RESUME_FILE for better results.")
+        from output_config import RESUME_PATH
+        
+        resume_path = str(RESUME_PATH)
+        if not RESUME_PATH.exists():
+            logging.warning(f"Resume not found at {resume_path}. Set RESUME_FILE or RESUME_PATH env var.")
         # cover_letter_and_summary.generate(job_url, resume_path) -> (job_md, summary, cover)
         job_md, summary, cover = genmod.generate(landing_url, resume_path)
         # Use centralized output paths
         OutputPaths.JOB_PAGE_MD.write_text(job_md, encoding="utf-8")
         OutputPaths.JOB_SUMMARY.write_text(summary, encoding="utf-8")
         OutputPaths.COVER_LETTER.write_text(cover, encoding="utf-8")
-        print(f"📝 Wrote {OutputPaths.JOB_SUMMARY} and {OutputPaths.COVER_LETTER}")
+        logging.info(f"Wrote {OutputPaths.JOB_SUMMARY} and {OutputPaths.COVER_LETTER}")
         return {"summary_path": str(OutputPaths.JOB_SUMMARY),
                 "cover_letter_path": str(OutputPaths.COVER_LETTER)}
     except Exception as e:
-        print(f"ℹ️ Could not run cover_letter_and_summary.generate(): {e}")
+        logging.warning(f"Could not run cover_letter_and_summary.generate(): {e}")
         return None
 
 @dataclass
@@ -378,6 +351,7 @@ def judge(start_url: str, headless: bool, slow_mo_ms: int, generate_cover: bool)
             errors=errors,
         )
 
+
         # Persist artifacts
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         OUT_JSON.write_text(json.dumps(asdict(result), indent=2), encoding="utf-8")
@@ -388,14 +362,14 @@ def judge(start_url: str, headless: bool, slow_mo_ms: int, generate_cover: bool)
         # ----- REQUIRED CONSOLE OUTPUT -----
         # This is an easy hook for your pipeline.
         if final_url:
-            print("✅ Reached application form page.")
-            print(f"Final form URL: {final_url}")
-            print("FORM_PAGE_REACHED=true")
+            logging.info("Reached application form page.")
+            logging.info(f"Final form URL: {final_url}")
+            logging.info("FORM_PAGE_REACHED=true")
         else:
-            print("❌ Did not reach application form page.")
-            print("FORM_PAGE_REACHED=false")
+            logging.error("Did not reach application form page.")
+            logging.info("FORM_PAGE_REACHED=false")
 
-        print(f"(Wrote {OUT_REACHED} with 'true/false')")
+        logging.info(f"(Wrote {OUT_REACHED} with 'true/false')")
 
         context.close()
         browser.close()

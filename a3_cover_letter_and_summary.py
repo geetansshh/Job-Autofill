@@ -10,8 +10,9 @@
 # ------------------------------------------------------------
 
 from __future__ import annotations
-import asyncio, os, re, textwrap
+import asyncio, os, re, textwrap, logging
 from pathlib import Path
+from output_config import OutputPaths
 
 # Suppress Google API/GRPC warnings
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
@@ -19,47 +20,35 @@ os.environ['GRPC_TRACE'] = ''
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['GOOGLE_CLOUD_DISABLE_GRPC_FOR_REST'] = 'true'
 
-from output_config import OutputPaths
+# Import centralized config
+from output_config import RESUME_PATH as DEFAULT_RESUME_PATH
 
-# ===================== EDIT THESE =====================
-JOB_URL        = "https://job-boards.greenhouse.io/hackerrank/jobs/7211528?gh_jid=7211528&gh_src=1836e8621us"     # <-- your job URL
-RESUME_PATH    = "./data/Geetansh_resume.pdf"               # prefers .txt; falls back to .pdf
-CANDIDATE_NAME = "Geetansh"                        # <-- your name (or None)
-EXTRAS         = None                             # <-- extra instructions for cover letter (or None)
-SUMMARY_ROLE_BULLETS  = 5   # bullets under ROLE SUMMARY
-SUMMARY_ABOUT_BULLETS = 3   # bullets under ABOUT THE COMPANY
-WORD_TARGET    = 160        # cover letter ~140–180 words
-REQUIRE_USER_APPROVAL = False   # Set to False to skip review and auto-save
-# OUTDIR removed - now using centralized output paths
-# ======================================================
+# Configuration constants
+JOB_URL = os.getenv("JOB_URL", "")
+# Use centralized resume path as default, but allow env override
+RESUME_PATH = os.getenv("RESUME_PATH", str(DEFAULT_RESUME_PATH))
+CANDIDATE_NAME = os.getenv("CANDIDATE_NAME", "Geetansh")
+EXTRAS = os.getenv("EXTRAS", None)
+SUMMARY_ABOUT_BULLETS = int(os.getenv("SUMMARY_ABOUT_BULLETS", "3"))
+SUMMARY_ROLE_BULLETS = int(os.getenv("SUMMARY_ROLE_BULLETS", "5"))
+WORD_TARGET = int(os.getenv("WORD_TARGET", "200"))
+REQUIRE_USER_APPROVAL = os.getenv("REQUIRE_USER_APPROVAL", "false").lower() == "true"
 
-# (optional) load .env for GEMINI_API_KEY
-try:
-    from dotenv import load_dotenv, find_dotenv
-    load_dotenv(find_dotenv(), override=False)
-except Exception:
-    pass
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
 
-# ---------- Resume reading ----------
+# ---------- PDF Reading ----------
 def read_resume_text(path: str) -> str:
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"Resume not found: {path}")
+    """Read text from PDF resume using pdfplumber."""
+    import pdfplumber
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Resume PDF not found: {path}")
+    with pdfplumber.open(path) as pdf:
+        parts = [(p.extract_text() or "") for p in pdf.pages]
+    return "\n".join(parts).strip()
 
-    if p.suffix.lower() in {".txt", ".md"}:
-        return p.read_text(encoding="utf-8", errors="ignore")
 
-    if p.suffix.lower() == ".pdf":
-        try:
-            from pypdf import PdfReader
-        except Exception as e:
-            raise RuntimeError("Install pypdf: pip install pypdf") from e
-        reader = PdfReader(str(p))
-        return "\n".join((page.extract_text() or "") for page in reader.pages)
-
-    # last resort
-    return p.read_text(encoding="utf-8", errors="ignore")
 
 
 # ---------- Crawl4AI: fetch markdown (generic) ----------
@@ -99,17 +88,17 @@ def crawl_markdown(url: str) -> str:
 def gen_with_gemini(prompt: str) -> str | None:
     api = os.getenv("GEMINI_API_KEY")
     if not api:
-        print("❌ No GEMINI_API_KEY found in environment")
+        logging.error("No GEMINI_API_KEY found in environment")
         return None
     try:
         import google.generativeai as genai
         genai.configure(api_key=api)
         model = genai.GenerativeModel("gemini-2.5-flash-lite")
         resp = model.generate_content(prompt)
-        print("✅ Successfully used Gemini AI")
+        logging.info("Successfully used Gemini AI")
         return (resp.text or "").strip()
     except Exception as e:
-        print(f"❌ Gemini API error: {str(e)[:100]}...")
+        logging.error(f"Gemini API error: {str(e)[:100]}...")
         return None
 
 
@@ -248,7 +237,7 @@ def build_cover_prompt(job_markdown: str,
     extra_line = f"Additional instructions: {extras}\n" if extras else ""
     company_hint = f"Company: {detected_company}\n" if detected_company else ""
     return textwrap.dedent(f"""
-        You are writing a professional cover letter for a job application.
+        You are writing a SHORT, CONCISE, professional cover letter for a job application.
 
         {name_line}{extra_line}{company_hint}
         JOB DESCRIPTION (Markdown):
@@ -260,20 +249,21 @@ def build_cover_prompt(job_markdown: str,
         INSTRUCTIONS:
         1. Extract the actual job title, responsibilities, and requirements from the job description
         2. Ignore website navigation, headers, "Apply Now" buttons, and formatting elements
-        3. Focus on technical skills mentioned: Python, SQL, APIs, LLM prompts, MySQL, etc.
-        4. Match the candidate's experience with Python, web scraping, data pipelines, and software engineering
-        5. Write a professional, specific cover letter addressing the real job content
+        3. Focus on 1-2 key technical skills that match the job
+        4. Match the candidate's most relevant experience with the job requirements
+        5. Write a SHORT, DIRECT cover letter - get to the point quickly
 
         REQUIREMENTS:
-        - Address the letter to "{detected_company} Hiring Team" if company provided
-        - ~{word_target} words (±20)
-        - Mention 2-3 specific technical skills that match the job
-        - Reference relevant experience from the resume
-        - Professional and confident tone
+        - Address to "{detected_company} Hiring Team" if company provided, otherwise "Hiring Team"
+        - Maximum 120-150 words (KEEP IT SHORT!)
+        - Mention 1-2 specific technical skills that match
+        - Reference ONLY the most relevant experience
+        - Professional and confident, but BRIEF
+        - 3 short paragraphs max: 1) Interest + key skill match, 2) Relevant experience, 3) Brief closing
 
         OUTPUT FORMAT (exact):
         COVER LETTER:
-        [Your cover letter content here]
+        [Your SHORT cover letter here - max 150 words]
     """).strip()
 
 
@@ -350,17 +340,14 @@ def fallback_cover_letter(job_md: str, resume_text: str, name: str | None,
     techs = ["selenium","appium","python","java","cypress","playwright","pytest",
              "jenkins","aws","gcp","azure","sql","rest","api","microservices","linux","kubernetes"]
     overlap = [t for t in techs if t in jd and t in cv]
-    highlight = ", ".join(overlap[:4]) if overlap else "relevant tools and practices"
+    highlight = ", ".join(overlap[:2]) if overlap else "relevant tools"
 
     greeting = f"Dear {company_hint} Hiring Team," if company_hint else "Dear Hiring Team,"
     who = name or "I"
     body = (
-        f"I’m excited to apply for this role. My background includes hands-on experience with {highlight}, "
-        f"which has helped improve automation reliability, speed up feedback cycles, and strengthen release quality.\n\n"
-        "In prior projects I built and maintained automated test suites, collaborated closely with engineering and product "
-        "to clarify acceptance criteria, and used CI/CD telemetry to focus testing where it mattered most. "
-        "I enjoy translating requirements into robust, maintainable tests and thrive in agile, cross-functional teams.\n\n"
-        "I’d welcome the chance to discuss how I can contribute to your roadmap. Thank you for your time and consideration."
+        f"I'm excited to apply for this role. My experience with {highlight} aligns well with your requirements.\n\n"
+        "I've built automated test suites, collaborated with cross-functional teams, and delivered quality improvements. "
+        "I'd welcome the opportunity to contribute to your team."
     )
     return f"COVER LETTER:\n{greeting}\n\n{body}\n\nBest regards,\n{who}"
 
@@ -398,12 +385,12 @@ def generate(job_url: str,
     summary_ai = gen_with_gemini(summary_prompt)
     if summary_ai and summary_ai.strip().startswith("SUMMARY:"):
         summary = summary_ai.strip()
-        print("✅ Using AI-generated summary")
+        logging.info("Using AI-generated summary")
     else:
         summary = fallback_job_summary(job_md_clean, about_bullets, role_bullets)
-        print("⚠️ Using fallback summary (AI failed)")
+        logging.warning("Using fallback summary (AI failed)")
         if summary_ai:
-            print(f"AI output was: {summary_ai[:100]}...")
+            logging.warning(f"AI output was: {summary_ai[:100]}...")
 
     # 2) COVER LETTER (job + resume)
     cover_prompt = build_cover_prompt(
@@ -417,10 +404,10 @@ def generate(job_url: str,
     cover_ai = gen_with_gemini(cover_prompt)
     if cover_ai and cover_ai.strip().startswith("COVER LETTER:"):
         cover = cover_ai.strip()
-        print("✅ Using AI-generated cover letter")
+        logging.info("Using AI-generated cover letter")
     elif cover_ai:
         cover = "COVER LETTER:\n" + cover_ai.strip()
-        print("✅ Using AI-generated cover letter (formatted)")
+        logging.info("Using AI-generated cover letter (formatted)")
     else:
         cover = fallback_cover_letter(job_md, resume_text, name, word_target, detected_company)
 
@@ -441,34 +428,34 @@ def main():
 
     detected_title, detected_company = guess_title_company_from_markdown(job_md)
     
-    print("\n" + "="*80)
-    print(f"JOB TITLE: {detected_title or 'Not detected'}")
-    print(f"COMPANY: {detected_company or 'Not detected'}")
-    print("="*80)
-    print("\nJOB SUMMARY:")
-    print(summary)
-    print("\n" + "="*80)
-    print("\nCOVER LETTER (preview):")
-    print(cover)
-    print("="*80)
+    logging.info("\n" + "="*80)
+    logging.info(f"JOB TITLE: {detected_title or 'Not detected'}")
+    logging.info(f"COMPANY: {detected_company or 'Not detected'}")
+    logging.info("="*80)
+    logging.info("\nJOB SUMMARY:")
+    logging.info(summary)
+    logging.info("\n" + "="*80)
+    logging.info("\nCOVER LETTER (preview):")
+    logging.info(cover)
+    logging.info("="*80)
 
     if REQUIRE_USER_APPROVAL:
         proceed = input("\nDoes this look correct? Proceed to next step? (yes/no): ").strip().lower()
         if proceed != "yes":
-            print("❌ Exiting at user request.")
+            logging.error("Exiting at user request.")
             import sys
             sys.exit(0)
-        print("✅ User approved. Saving files...")
+        logging.info("User approved. Saving files...")
     else:
-        print("✅ Auto-saving files (user approval disabled)...")
+        logging.info("Auto-saving files (user approval disabled)...")
 
     OutputPaths.JOB_SUMMARY.write_text(summary, encoding="utf-8")
     OutputPaths.COVER_LETTER.write_text(cover, encoding="utf-8")
 
-    print("\nSaved files:")
-    print(f" - {OutputPaths.JOB_PAGE_MD}       (raw job Markdown)")
-    print(f" - {OutputPaths.JOB_SUMMARY}   (job-focused summary)")
-    print(f" - {OutputPaths.COVER_LETTER}  (tailored cover letter)")
+    logging.info("\nSaved files:")
+    logging.info(f" - {OutputPaths.JOB_PAGE_MD}       (raw job Markdown)")
+    logging.info(f" - {OutputPaths.JOB_SUMMARY}   (job-focused summary)")
+    logging.info(f" - {OutputPaths.COVER_LETTER}  (tailored cover letter)")
 
 if __name__ == "__main__":
     main()

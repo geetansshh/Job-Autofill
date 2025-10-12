@@ -18,12 +18,15 @@ Run:
   python fill_form_from_resume_general.py
 """
 
+
 import os
+import logging
 # Suppress Google API/GRPC warnings
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
 os.environ['GRPC_TRACE'] = ''
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['GOOGLE_CLOUD_DISABLE_GRPC_FOR_REST'] = 'true'
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
 import json
 import os
@@ -31,6 +34,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 from output_config import OutputPaths
+from utils import ci_match_label, normalize
 
 # ========================= HARD-CODED CONFIG =========================
 FORM_PATH = OutputPaths.FORM_FIELDS_ENHANCED     # Now using centralized paths
@@ -337,7 +341,8 @@ def normalize_fields(form: Dict[str, Any]) -> List[NormalizedField]:
             ))
 
     if not out:
-        raise ValueError("No valid fields with id and question found.")
+        logging.warning("No valid fields with id and question found in form JSON.")
+        # Return empty list instead of raising error - let caller handle gracefully
     return out
 
 def extract_simple_facts(source_text: str) -> Dict[str, Any]:
@@ -377,7 +382,8 @@ def build_model_payload(fields: List[NormalizedField],
 
 def call_gemini(prompt_payload: Dict[str, Any], model_name: str) -> Dict[str, Any]:
     import google.generativeai as genai
-    api_key = "AIzaSyAJrmvM10sV7GxgzAwApFtGtR3ht6l3fY0"
+    import os
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("Missing GEMINI_API_KEY / GOOGLE_API_KEY environment variable.")
     genai.configure(api_key=api_key)
@@ -492,10 +498,24 @@ def validate_and_clip(fields: List[NormalizedField], model_out: Dict[str, Any]) 
 
 # ---------------------------- Main (no argparse) ----------------------------
 
-def main():
+def main() -> None:
+    """
+    Main entry point for the form answer generation script using Gemini.
+    """
     # Load inputs
     form = load_json(FORM_PATH)
     fields = normalize_fields(form)
+    
+    # Handle case when no fields are found
+    if not fields:
+        logging.warning("No form fields found to process. Creating empty output files.")
+        with open(ANSWERS_OUT, "w", encoding="utf-8") as f:
+            json.dump({}, f, ensure_ascii=False, indent=2)
+        with open(SKIPPED_OUT, "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False, indent=2)
+        logging.info(f"Wrote empty: {ANSWERS_OUT}")
+        logging.info(f"Wrote empty: {SKIPPED_OUT}")
+        return
 
     resume_text, _resume_json = read_resume_any(RESUME_PATH)
     facts_resume = extract_simple_facts(resume_text)
@@ -507,10 +527,10 @@ def main():
     payload = build_model_payload(fields, resume_text, facts_resume, context_text, facts_context)
 
     if DRY_RUN:
-        print("=== SYSTEM INSTRUCTION ===")
-        print(SYSTEM_INSTRUCTION.strip())
-        print("\n=== PROMPT PAYLOAD (to model) ===")
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        logging.info("=== SYSTEM INSTRUCTION ===")
+        logging.info(SYSTEM_INSTRUCTION.strip())
+        logging.info("\n=== PROMPT PAYLOAD (to model) ===")
+        logging.info(json.dumps(payload, ensure_ascii=False, indent=2))
         return
 
     # Call Gemini
@@ -525,8 +545,9 @@ def main():
     with open(SKIPPED_OUT, "w", encoding="utf-8") as f:
         json.dump(skipped, f, ensure_ascii=False, indent=2)
 
-    print(f"Wrote: {ANSWERS_OUT}")
-    print(f"Wrote: {SKIPPED_OUT}")
+    logging.info(f"Wrote: {ANSWERS_OUT}")
+    logging.info(f"Wrote: {SKIPPED_OUT}")
+
 
 if __name__ == "__main__":
     main()

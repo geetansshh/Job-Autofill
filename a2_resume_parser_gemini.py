@@ -10,14 +10,17 @@ Ultra-minimal: pass resume PDF text to Gemini, get back JSON, save to parsed_res
 
 import json
 import os
+import logging
 import pdfplumber
 from dotenv import load_dotenv
+
 
 # Suppress Google API/GRPC warnings
 os.environ['GRPC_VERBOSITY'] = 'ERROR'
 os.environ['GRPC_TRACE'] = ''
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['GOOGLE_CLOUD_DISABLE_GRPC_FOR_REST'] = 'true'
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
 from output_config import OutputPaths
 
@@ -60,22 +63,25 @@ def build_prompt(resume_text: str) -> str:
         "```\n" + resume_text + "\n```"
     )
 
-def main():
+def main() -> None:
+    """
+    Main entry point for the resume parsing script using Gemini.
+    """
     # 1) load key
     load_dotenv()
-    api_key ="AIzaSyAJrmvM10sV7GxgzAwApFtGtR3ht6l3fY0"
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        print("[error] GEMINI_API_KEY missing in environment/.env")
+        logging.error("GEMINI_API_KEY missing in environment/.env")
         return
 
     # 2) read pdf
     try:
         text = read_pdf_text(RESUME_PDF)
         if not text:
-            print("[error] No text extracted from PDF (is it scanned?).")
+            logging.error("No text extracted from PDF (is it scanned?).")
             return
     except Exception as e:
-        print(f"[error] reading PDF: {e}")
+        logging.error(f"Error reading PDF: {e}")
         return
 
     # 3) call Gemini with JSON response enforced
@@ -100,16 +106,17 @@ def main():
             else:
                 raise
     except Exception as e:
-        print(f"[error] Gemini call/JSON parse failed: {e}")
+        logging.error(f"Gemini call/JSON parse failed: {e}")
         return
 
     # 4) write JSON to disk
     try:
         with open(OUT_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-        print(f"[ok] wrote {OUT_PATH}")
+        logging.info(f"Wrote {OUT_PATH}")
     except Exception as e:
-        print(f"[error] writing {OUT_PATH}: {e}")
+        logging.error(f"Error writing {OUT_PATH}: {e}")
+
 
 if __name__ == "__main__":
     main()

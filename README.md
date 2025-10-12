@@ -1,249 +1,279 @@
-here’s a drop-in “architecture README” you can paste into your repo so any fresh chat (or teammate) instantly groks the codebase.
+# 🤖 Job Application Autofill Bot
 
----
+An intelligent Telegram bot that automates job application form filling using AI-powered resume parsing, cover letter generation, and smart form completion.
 
-# Job Autofill — project map & how it works
+## ✨ Features
 
-**What it does**
+### 🎯 Core Functionality
+- **Automated Form Filling**: Automatically detects and fills job application forms using Playwright
+- **AI-Powered Resume Parsing**: Extracts information from PDF resumes using Google Gemini AI
+- **Smart Cover Letter Generation**: Creates tailored, concise cover letters (120-150 words) based on job description
+- **Intelligent Form Detection**: Analyzes web pages to determine if they contain application forms
+- **Multi-Step Pipeline**: Orchestrated workflow from job link to submitted application
 
-1. opens a job page (any ATS),
-2. scrapes the job text → generates a concise summary + a tailored cover letter (via Gemini using `GEMINI_API_KEY` from `.env`),
-3. shows you both for approval,
-4. uploads your resume,
-5. fills contact fields from `parsed_resume.json` (falls back to Gemini, then asks you),
-6. for dropdowns/comboboxes/radios/checkboxes: shows **actual options** and only selects from those (no free typing),
-7. re-checks required fields, asks again if needed,
-8. submits and saves a full-page screenshot.
+### 💬 Telegram Bot Interface
+- **Interactive Conversation Flow**: User-friendly step-by-step guidance
+- **Real-time Progress Updates**: Live feedback during each pipeline stage
+- **Screenshot Sharing**: Visual confirmation of filled forms before submission
+- **Smart Approval System**: Multiple approval checkpoints for user control
 
-**Run**
+### 🔄 Advanced Workflow Control
 
+#### 1. **Post-Generation Approval**
+After generating cover letter and job summary, bot asks for approval to continue:
+- Review AI-generated content before proceeding
+- Option to stop the process if job isn't suitable
+- Saves time by not processing unwanted applications
+
+#### 2. **Comprehensive Q&A Review**
+Before form submission, displays ALL form fields and answers:
+- Shows both auto-generated AND user-provided answers
+- Numbered list format for easy reference
+- Clear distinction between filled and unfilled fields
+
+#### 3. **Natural Language Modifications**
+Edit answers using intuitive commands:
+- **Single change**: `"change question 2 to yes"`
+- **Multiple changes**: `"question 2 to yes, question 3 to no, question 4 to maybe"`
+- **Flexible formats**:
+  - `"modify <old answer> to <new answer>"`
+  - `"update <field name> to <new value>"`
+  - `"change q1 to abc and q5 to xyz"`
+
+#### 4. **Automatic Submission**
+After Q&A approval, form is automatically filled and submitted:
+- No additional confirmation needed
+- Streamlined workflow
+- After-submit screenshot sent for verification
+
+### 🧠 Smart Field Handling
+- **Automatic Answer Generation**: AI fills most fields using resume data
+- **Skipped Field Detection**: Identifies fields that need user input
+- **Interactive Question Flow**: Asks user for missing information one by one
+- **Answer Merging**: Seamlessly combines AI-generated and user-provided answers
+- **Context-Aware Responses**: Uses supplemental context (work authorization, location preferences, etc.)
+
+### 🎨 User Experience
+- **Short, Concise Cover Letters**: 120-150 words max, direct and impactful
+- **Progress Indicators**: Real-time status updates during processing
+- **Error Handling**: Graceful failure recovery with helpful messages
+- **Session Management**: Maintains user state across conversation
+- **Flexible Input**: Accepts various answer formats and natural language
+
+## 🏗️ Architecture
+
+### Pipeline Stages
+
+```
+Job URL → Page Analysis → Resume Parsing → Cover Letter Generation
+    ↓
+[Approval Checkpoint #1]
+    ↓
+Form Extraction → Answer Generation → User Questions (if needed)
+    ↓
+[Approval Checkpoint #2 - Review ALL Answers]
+    ↓
+Form Filling → Auto-Submit → Screenshot Confirmation
+```
+
+### Key Components
+
+| Script | Purpose |
+|--------|---------|
+| `telegram_bot.py` | Main bot interface and conversation handler |
+| `a1_page_judger.py` | Analyzes if URL contains job application form |
+| `a2_resume_parser_gemini.py` | Extracts structured data from resume PDF |
+| `a3_cover_letter_and_summary.py` | Generates cover letter and job summary |
+| `a4_enhanced_form_extractor.py` | Extracts form fields using Playwright |
+| `a5_form_answer_gemini.py` | AI-powered answer generation for forms |
+| `a7_fill_form_resume.py` | Fills and submits forms using Playwright |
+| `llm_parser.py` | Natural language parsing for answer modifications |
+| `output_config.py` | Centralized output paths and configuration |
+| `utils.py` | Shared utility functions |
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Python 3.11+
+- Telegram Bot Token (from @BotFather)
+- Google Gemini API Key
+- macOS/Linux/Windows
+
+### Installation
+
+1. **Clone the repository**
+```bash
+git clone https://github.com/geetansshh/Job-Autofill.git
+cd Job-Autofill
+```
+
+2. **Create virtual environment**
+```bash
+python3 -m venv autofill
+source autofill/bin/activate  # On Windows: autofill\Scripts\activate
+```
+
+3. **Install dependencies**
 ```bash
 pip install -r requirements.txt
-playwright install chromium
-python -m app.apply
 ```
 
-`.env` (example):
-
-```
-GEMINI_API_KEY=YOUR_KEY
-JOB_URL=https://example.com/job
-HEADLESS=true
+4. **Set up environment variables**
+```bash
+export GEMINI_API_KEY="your-gemini-api-key"
+export TELEGRAM_BOT_TOKEN="your-telegram-bot-token"
 ```
 
----
-
-## Files & responsibilities
-
-### `app/apply.py` — entrypoint
-
-* Tiny bootstrap that calls `runner.main()`.
-* Run with: `python -m app.apply`.
-
----
-
-### `app/runner.py` — the orchestrator (main flow)
-
-* Owns the **application flow** end-to-end:
-
-  1. Load profile & resume text (`profile.load_profile`, `profile.extract_contact`, `profile.read_resume_text`).
-  2. Launch Playwright, open `JOB_URL`.
-  3. Scrape job page (`job.scrape_job_text`).
-  4. Draft summary + cover letter (`llm.draft_summary_and_letter`) and ask you to approve (`prompts.yes_no`).
-  5. Discover form fields (`dom.collect_form_fields`) and upload resume (`fill.upload_resume_if_possible`).
-  6. Plan contact values: JSON → LLM fallback (`llm.infer_with_llm`) → ask you (`prompts.prompt_user_for`).
-  7. Handle **unknown questions**:
-
-     * For selects/comboboxes: read live options (`widgets.open_combobox_and_get_options`) and let you choose (`prompts.prompt_user_choice` / `prompt_user_multi`).
-     * For radios/checkboxes: group by name, show choices once, then record picks.
-     * For text fields: only ask if required.
-  8. **Review planned values** in console; ask to proceed.
-  9. Fill everything (`fill.fill_value_into_field`).
-
-10. Re-scan required empties and ask again if needed (`dom.read_current_value`).
-11. Confirm & submit (`fill.click_submit`), take full-page screenshot, and heuristically detect success (`fill.success_indicator`).
-
-Think of `runner.py` as the script’s “director”.
-
----
-
-### `app/config.py` — configuration & shared constants
-
-* Loads `.env` so `GEMINI_API_KEY`, `JOB_URL`, etc. are available.
-* Exposes overridable constants:
-
-  * `JOB_URL`, `PARSED_JSON`, `RESUME_PDF`, `RESUME_TXT`, `HEADLESS`, `SCREENSHOT_DIR`.
-* Defines `FIELD_SYNONYMS` (phrase → canonical key) and `KNOWN_KEYS` (contact fields we try to auto-fill).
-* You can add synonyms here to improve field detection across ATS.
-
----
-
-### `app/profile.py` — candidate data
-
-* `load_profile()`: reads `parsed_resume.json` (produced by your resume parser).
-* `extract_contact(profile)`: normalizes contact info:
-
-  * name → first/last, email, phone, links (LinkedIn/GitHub/portfolio), location.
-* `read_resume_text()`: pulls plain-text resume (prefers `data/resume.txt`, falls back to PDF extraction).
-
----
-
-### `app/llm.py` — Gemini helpers
-
-* `gemini_text(prompt)`: thin wrapper that uses `GEMINI_API_KEY` from `.env`.
-* `infer_with_llm(field_key, resume_text)`: tries to extract a single contact field from resume text (returns `None` if unknown).
-* `draft_summary_and_letter(job, resume_text, contact)`:
-
-  * Produces a **4–6 bullet summary** and a **120–160 word cover letter** tailored to the job.
-  * Pure fallback (non-LLM) is used if the key or texts are missing.
-
----
-
-### `app/prompts.py` — command-line UI
-
-* `prompt_user_for(...)`: ask for a free-text value (used only when required or for missing contact fields).
-* `prompt_user_choice(...)`: single-choice picker; you can answer by number or by typing option text.
-* `prompt_user_multi(...)`: multi-choice version, supports comma-separated numbers or option texts.
-* `yes_no(...)`: y/n confirmation prompts used for review and submit.
-
----
-
-### `app/dom.py` — DOM discovery & required detection
-
-* Walks **all frames**; finds:
-
-  * native `input`, `select`, `textarea`
-  * `role="combobox"` / `aria-haspopup="listbox"` custom widgets (React-Select, Select2, etc.)
-* For each element returns a field object:
-
-  ```
-  {
-    frame, el, widget, type, label, placeholder, name, aria,
-    key, required, options, multiple, group_name
-  }
-  ```
-
-  * `widget` ∈ {`input`, `textarea`, `select`, `combobox`, `checkbox`, `radio`}
-  * `key` is the canonical field (`first_name`, `email`, `cover_letter`, etc.) matched via `FIELD_SYNONYMS`.
-  * `required` is true if:
-
-    * element has `required`/`aria-required="true"`, or
-    * label includes an asterisk `*` (many ATS rely on this).
-  * `options` filled for native `<select>` or `<input list="datalist">`.
-  * `group_name` set for radios/checkboxes to group choices.
-* `read_current_value(f)`: returns current field value (used when re-checking required fields).
-
----
-
-### `app/widgets.py` — custom dropdowns (comboboxes)
-
-* Deals with modern dropdowns rendered outside the form (portals).
-* `open_combobox_and_get_options(page, frame, el)`:
-
-  * scrolls/focuses, opens the menu (click + key hints),
-  * reads **visible** options anywhere on the page,
-  * returns a **de-duplicated** list of `(value, label)`.
-* `select_in_combobox(page, frame, el, picks)`:
-
-  * **strictly clicks a listed option** (no free typing), matching by exact or partial label/value.
-  * Handles single or multiple sequential picks.
-
-This is why the script works on Greenhouse, Lever, Workday, Ashby, Taleo, SmartRecruiters, and most custom sites.
-
----
-
-### `app/fill.py` — filling & submission
-
-* `upload_resume_if_possible(fields)`: finds a resume/CV file control (native or labeled) and sets `RESUME_PDF`.
-* `fill_value_into_field(f, val, page=None)`:
-
-  * smart `select` (value→label fallback),
-  * `combobox` (click option via `widgets.select_in_combobox`),
-  * checkbox/radio selection,
-  * text fields (clear + type).
-* `click_submit(page)`: tries several common submit/apply selectors.
-* `success_indicator(page)`: heuristics to detect “Thanks/Received/Submitted” messages.
-
----
-
-### `app/job.py` — job page scraping
-
-* `scrape_job_text(page)`: extracts:
-
-  * `title` (first `h1/h2`),
-  * `company` (common selectors or page title fallback),
-  * `location` (basic heuristic),
-  * `body` (main content text).
-* This text feeds the LLM to produce the summary & cover letter.
-
----
-
-## Data flow (high level)
-
-```
-config      profile      job         llm            dom/widgets         fill
-  |           |           |           |                  |                |
-  v           v           v           v                  v                v
-.ENV -> constants  JSON->contact  page->job  -> summary+cover-letter  discover fields -> upload resume
-                                 (approve)                          -> plan contact -> ask for unknowns
-                                                                     -> review -> fill -> recheck -> submit
+5. **Configure your resume**
+Place your resume PDF in `data/` folder and update `output_config.py`:
+```python
+RESUME_PATH = OUTPUT_BASE.parent / "data" / "Your_Resume.pdf"
 ```
 
+6. **Set up supplemental context**
+Edit `Supplemental-context.json` with your details:
+```json
+{
+  "candidate_status": "Current student; seeking an internship",
+  "availability_start": "Immediate",
+  "work_authorization": {
+    "country": "India",
+    "has_valid_permit": true
+  },
+  "preferred_locations_ordered": ["Bengaluru", "Pune", "Hyderabad"],
+  "willing_to_relocate": true,
+  "Country_code": "+91"
+}
+```
+
+### Running the Bot
+
+```bash
+python telegram_bot.py
+```
+
+Or run individual scripts:
+```bash
+# Run full pipeline
+python pipeline_runner.py
+
+# Run specific steps
+python a1_page_judger.py
+python a2_resume_parser_gemini.py
+# ... etc
+```
+
+## 📱 Using the Telegram Bot
+
+1. **Start the bot**: Send `/start` to your bot
+2. **Send job URL**: Paste the job application link
+3. **Review cover letter**: Bot generates and shows cover letter/summary
+4. **Approve to continue**: Reply `yes` to proceed or `no` to stop
+5. **Answer questions**: Provide information for fields bot couldn't fill
+6. **Review all answers**: Bot shows complete Q&A list
+7. **Make modifications** (optional):
+   - `"question 2 to yes"`
+   - `"question 2 to yes, question 3 to no"`
+8. **Approve final answers**: Reply `yes` to auto-submit
+9. **Done!**: Bot fills, submits, and sends confirmation screenshot
+
+## 🎯 Example Interactions
+
+### Modifying Single Answer
+```
+User: change question 2 to yes
+Bot: ✅ Updated!
+     Question: Are you authorized to work?
+     Old answer: Not filled
+     New answer: yes
+```
+
+### Modifying Multiple Answers
+```
+User: question 2 to yes, question 3 to no, question 4 to maybe
+Bot: ✅ Updated 3 field(s)!
+     • Are you authorized to work?: Not filled → yes
+     • Will you require sponsorship?: Not filled → no
+     • Available for relocation?: Not filled → maybe
+```
+
+## 📊 Output Structure
+
+```
+outputs/
+├── data/
+│   ├── filled_answers.json          # All form answers (single source of truth)
+│   ├── parsed_resume.json           # Extracted resume data
+│   ├── form_fields_enhanced.json    # Extracted form fields
+│   ├── skipped_fields.json          # Fields needing user input
+│   └── user_completed_answers.json  # User-provided answers
+├── documents/
+│   ├── cover_letter.txt             # Generated cover letter
+│   ├── job_summary.txt              # Job description summary
+│   └── job_page.md                  # Scraped job page content
+├── logs/
+│   ├── page_judger_out.json         # Page analysis results
+│   ├── resolved_form_url.txt        # Final form URL
+│   └── form_page_reached.txt        # Navigation confirmation
+└── screenshots/
+    ├── before_submit_*.png          # Form preview
+    └── after_submit_*.png           # Submission confirmation
+```
+
+## 🔧 Command-Line Flags
+
+### a7_fill_form_resume.py
+```bash
+# Fill form but don't submit
+python a7_fill_form_resume.py --no-submit
+
+# Fill and auto-submit (no approval prompt)
+python a7_fill_form_resume.py --no-approval
+
+# Fill only, no submission, no approval prompt
+python a7_fill_form_resume.py --no-submit --no-approval
+```
+
+## 🛠️ Technologies Used
+
+- **Telegram Bot API**: python-telegram-bot 20.0b0
+- **AI/ML**: Google Gemini 2.5 Flash Lite
+- **Web Automation**: Playwright (Chromium)
+- **Web Scraping**: Crawl4AI 0.7.4
+- **PDF Processing**: pdfplumber
+- **Language**: Python 3.11
+
+## 📈 Key Improvements (Recent Updates)
+
+### October 12, 2025
+- ✅ **Shortened cover letters** to 120-150 words (previously ~200)
+- ✅ **Added approval checkpoint** after cover letter generation
+- ✅ **Show ALL Q&A for review** (not just user-answered fields)
+- ✅ **Natural language modifications** with multi-field support
+- ✅ **Auto-submit after Q&A approval** (removed redundant submission prompt)
+- ✅ **Multiple field modifications** in single message
+- ✅ **Fixed AttributeError** with form field parsing
+- ✅ **Improved error handling** and user feedback
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📝 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+- Google Gemini API for AI-powered content generation
+- Playwright team for robust browser automation
+- python-telegram-bot for excellent Telegram integration
+- Crawl4AI for efficient web scraping
+
+## 📧 Contact
+
+For questions or feedback, please open an issue on GitHub.
+
 ---
 
-## How to customize
-
-* **Point to a new job link**
-  Set `JOB_URL` in `.env` (preferred) or edit `app/config.py`.
-
-* **Add/adjust field detection**
-  Add phrases to `FIELD_SYNONYMS` in `app/config.py` (e.g., map “mobile number” → `phone`).
-
-* **Pre-wire default answers**
-  If a site always asks specific questions, you can intercept in `runner.py` before prompting (e.g., detect by label text and set a default choice).
-
-* **Debug dropdowns**
-  Set `HEADLESS=false` in `.env` to watch the clicks. If a menu still won’t show options, log the HTML around the control and add a CSS selector to `widgets._visible_option_nodes`.
-
----
-
-## Environment & safety notes
-
-* The script loads `.env` automatically; **never commit** `.env`. Keep `screenshots/` ignored too.
-* `.env.example` can document variables without secrets.
-* The LLM is used only for:
-
-  * job summary + cover letter,
-  * guessing missing **contact** fields,
-  * it never “hallucinates” dropdown answers — those must be chosen from real options.
-
----
-
-## Common pitfalls & fixes
-
-* **“Dropdown shows but no options in console”**
-  Some portals render menus at the end of `<body>`. We scan page-wide; if still empty, the widget might lazy-load—click the combobox once manually to load the list, then re-run the prompt step.
-
-* **Site requires CAPTCHA/MFA**
-  The script can’t solve those; set `HEADLESS=false`, complete the step, then continue.
-
-* **Submit button not found**
-  Add a site-specific selector in `fill.click_submit`.
-
-* **PDF text extraction is poor**
-  Put a plain-text copy of your resume at `data/resume.txt`—it’s preferred by the LLM helper.
-
----
-
-## Quick runbook
-
-1. Put your resume at `data/resume.pdf` (and optionally `data/resume.txt`).
-2. Put your parsed resume JSON at `parsed_resume.json`.
-3. Create `.env` with `GEMINI_API_KEY` and `JOB_URL`.
-4. `pip install -r requirements.txt && playwright install chromium`
-5. `python -m app.apply`
-6. Approve cover letter → answer dropdown prompts → review → submit → check screenshot path printed.
-
----
-
-Save this page as `README.md` in your repo and you’ll have a perfect handoff for any new chat or collaborator.
+**Made with ❤️ for automating the tedious parts of job hunting**

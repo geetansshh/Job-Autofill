@@ -1,63 +1,74 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Complete Job Application Pipeline Runner
+#
+# Complete Job Application Pipeline Runner
+#
+# This script orchestrates the entire job application automation process:
+# 1. a1_page_judger.py - Analyze job page and find application form
+# 2. a2_resume_parser_gemini.py - Parse resume using Gemini AI
+# 3. a3_cover_letter_and_summary.py - Generate cover letter and job summary
+# 4. a4_enhanced_form_extractor.py - Extract form fields with technical + AI analysis
+# 5. a5_form_answer_gemini.py - Generate form answers using AI
+# 6. a6_complete_skipped_fields.py - Interactive completion of skipped fields
+# 7. a7_fill_form_resume.py - Automated form filling and submission
+#
+# Usage:
+#     python pipeline_runner.py --url "https://job-url-here"
+#
+#     # Or set URL in the script and run:
+#     python pipeline_runner.py
 
-This script orchestrates the entire job application automation process:
-1. a1_page_judger.py - Analyze job page and find application form
-2. a2_resume_parser_gemini.py - Parse resume using Gemini AI
-3. a3_cover_letter_and_summary.py - Generate cover letter and job summary
-4. a4_enhanced_form_extractor.py - Extract form fields with technical + AI analysis
-5. a5_form_answer_gemini.py - Generate form answers using AI
-6. a6_complete_skipped_fields.py - Interactive completion of skipped fields
-7. a7_fill_form_resume.py - Automated form filling and submission
-
-Usage:
-    python pipeline_runner.py --url "https://job-url-here"
-    
-    # Or set URL in the script and run:
-    python pipeline_runner.py
-
-Requirements:
-    - All pipeline scripts (a1-a7) must be in the same directory
-    - Virtual environment with all dependencies installed
-    - .env file with GEMINI_API_KEY
-    - Resume file at ./data/Geetansh_resume.pdf
-    - Supplemental context at ./Supplemental-context.json (optional)
-"""
-
-import subprocess
-import sys
 import os
-import json
-from pathlib import Path
-from typing import Optional, Dict, Any
-import tempfile
+import sys
+import subprocess
 import shutil
 from datetime import datetime
+from pathlib import Path
+from typing import Optional, Dict, List
+from output_config import OutputPaths, OUTPUT_BASE
 
-# Import comprehensive warning suppression
-try:
-    from warning_suppressor import *
-except ImportError:
-    # Fallback suppression
-    os.environ['GRPC_VERBOSITY'] = 'ERROR'
-    os.environ['GRPC_TRACE'] = ''
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-    os.environ['GOOGLE_CLOUD_DISABLE_GRPC_FOR_REST'] = 'true'
-
-from output_config import OutputPaths, ensure_output_dirs, OUTPUT_BASE
+def ensure_output_dirs():
+    Path(OUTPUT_BASE).mkdir(parents=True, exist_ok=True)
+    for attr in dir(OutputPaths):
+        if attr.isupper():
+            val = getattr(OutputPaths, attr)
+            p = Path(val)
+            if p.suffix == '':
+                p.mkdir(parents=True, exist_ok=True)
 
 class PipelineRunner:
-    def __init__(self, job_url: str, resume_path: str = "./data/Geetansh_resume.pdf", 
-                 headless: bool = True, auto_submit: bool = False):
+    def _clear_output_files(self):
+        """Clear or reset all relevant output files at the start of each run."""
+        output_files = [
+            OutputPaths.COVER_LETTER,
+            OutputPaths.JOB_SUMMARY,
+            OutputPaths.JOB_PAGE_MD,
+            OutputPaths.PARSED_RESUME,
+            OutputPaths.FORM_FIELDS_ENHANCED,
+            OutputPaths.FILLED_ANSWERS,
+            OutputPaths.USER_COMPLETED_ANSWERS,
+            OutputPaths.SKIPPED_FIELDS,
+            OutputPaths.STILL_SKIPPED,
+            OutputPaths.PAGE_JUDGER_OUT,
+            OutputPaths.RESOLVED_FORM_URL,
+        ]
+        for file_path in output_files:
+            try:
+                p = Path(file_path)
+                if p.exists() and p.is_file():
+                    p.write_text("")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not clear {file_path}: {e}")
+    def __init__(self, job_url: str, resume_path: str,
+                 headless: bool = True, auto_submit: bool = False, 
+                 non_interactive: bool = False):
         self.job_url = job_url
         self.resume_path = Path(resume_path)
         self.headless = headless
         self.auto_submit = auto_submit
+        self.non_interactive = non_interactive
         self.python_executable = self._get_python_executable()
-        
-        # Ensure outputs directory exists
         ensure_output_dirs()
         
     def _get_python_executable(self) -> str:
@@ -68,7 +79,8 @@ class PipelineRunner:
         return sys.executable
     
     def _run_script(self, script_name: str, description: str, 
-                   env_vars: Optional[Dict[str, str]] = None) -> bool:
+                   env_vars: Optional[Dict[str, str]] = None,
+                   extra_args: Optional[List[str]] = None) -> bool:
         """Run a pipeline script and return success status"""
         print(f"\n{'='*60}")
         print(f"🚀 STEP: {description}")
@@ -88,6 +100,8 @@ class PipelineRunner:
         try:
             # Run the script
             cmd = [self.python_executable, str(script_path)]
+            if extra_args:
+                cmd.extend(extra_args)
             print(f"🔧 Command: {' '.join(cmd)}")
             
             result = subprocess.run(
@@ -190,6 +204,8 @@ class PipelineRunner:
     
     def run_pipeline(self) -> bool:
         """Execute the complete pipeline"""
+        # Clear/reset output files at the start
+        self._clear_output_files()
         start_time = datetime.now()
         print(f"\n🎯 Starting Job Application Pipeline")
         print(f"🔗 Target URL: {self.job_url}")
@@ -226,33 +242,30 @@ class PipelineRunner:
         
         # Step 3: Cover Letter Generator - Create cover letter and job summary
         if success:
-            # Update URL in a3_cover_letter_and_summary.py
-            replacements = {
-                'JOB_URL        = "https://job-boards.greenhouse.io/gomotive/jobs/8137073002?gh_src=my.greenhouse.search"':
-                f'JOB_URL        = "{self.job_url}"'
+            # Pass URL and resume path via environment variables
+            env_vars = {
+                "JOB_URL": self.job_url,
+                "RESUME_PATH": str(self.resume_path.absolute())
             }
-            self._update_script_config("a3_cover_letter_and_summary.py", replacements)
             
             success = self._run_script(
                 "a3_cover_letter_and_summary.py",
-                "Generating cover letter and job summary"
+                "Generating cover letter and job summary",
+                env_vars
             )
-            self._restore_script_config("a3_cover_letter_and_summary.py")
         
         # Step 4: Enhanced Form Extractor - Extract form fields with AI analysis
         if success:
-            # Update URL in a4_enhanced_form_extractor.py
-            replacements = {
-                'JOB_URL = "https://job-boards.greenhouse.io/gomotive/jobs/8137073002?gh_src=my.greenhouse.search"':
-                f'JOB_URL = "{self.job_url}"'
+            # Pass URL via environment variable
+            env_vars = {
+                "JOB_URL": self.job_url
             }
-            self._update_script_config("a4_enhanced_form_extractor.py", replacements)
             
             success = self._run_script(
                 "a4_enhanced_form_extractor.py",
-                "Extracting form fields with technical + AI analysis"
+                "Extracting form fields with technical + AI analysis",
+                env_vars
             )
-            self._restore_script_config("a4_enhanced_form_extractor.py")
         
         # Step 5: Form Answer Generator - Generate answers using AI
         if success:
@@ -263,9 +276,14 @@ class PipelineRunner:
         
         # Step 6: Complete Skipped Fields - Interactive completion
         if success:
+            env_vars = {}
+            if self.non_interactive:
+                env_vars["NON_INTERACTIVE"] = "true"
+            
             success = self._run_script(
                 "a6_complete_skipped_fields.py",
-                "Interactive completion of skipped fields"
+                "Completing skipped fields" if self.non_interactive else "Interactive completion of skipped fields",
+                env_vars if env_vars else None
             )
         
         # Step 7: Form Filler - Automated form filling and submission
@@ -309,6 +327,67 @@ class PipelineRunner:
         
         # Show output summary
         self._show_output_summary()
+        
+        return success
+    
+    def run_pipeline_until_step(self, step_number: int) -> bool:
+        """Run pipeline up to (and including) a specific step"""
+        self._clear_output_files()
+        start_time = datetime.now()
+        print(f"\n🎯 Starting Job Application Pipeline (until step {step_number})")
+        print(f"🔗 Target URL: {self.job_url}")
+        print(f"📄 Resume: {self.resume_path}")
+        
+        if not self._check_prerequisites():
+            return False
+        
+        success = True
+        
+        # Run steps 1 through step_number
+        steps = [
+            (1, "a1_page_judger.py", "Analyzing job page and finding application form", {}),
+            (2, "a2_resume_parser_gemini.py", "Parsing resume using Gemini AI", {}),
+            (3, "a3_cover_letter_and_summary.py", "Generating cover letter and job summary", 
+             {"JOB_URL": self.job_url, "RESUME_PATH": str(self.resume_path.absolute())}),
+            (4, "a4_enhanced_form_extractor.py", "Extracting form fields with technical + AI analysis",
+             {"JOB_URL": self.job_url}),
+            (5, "a5_form_answer_gemini.py", "Generating form answers using Gemini AI", {}),
+        ]
+        
+        for step_num, script, description, env_vars in steps:
+            if step_num > step_number:
+                break
+            if success:
+                success = self._run_script(script, description, env_vars if env_vars else None)
+        
+        return success
+    
+    def run_pipeline_from_step(self, step_number: int) -> bool:
+        """Continue pipeline from a specific step"""
+        print(f"\n🎯 Continuing Job Application Pipeline (from step {step_number})")
+        
+        success = True
+        
+        # Step 7: Form Filler
+        if step_number <= 7 and success:
+            replacements = {
+                'JOB_URL = "https://job-boards.greenhouse.io/gomotive/jobs/8137073002?gh_src=my.greenhouse.search"':
+                f'JOB_URL = "{self.job_url}"',
+                'HEADLESS = False': f'HEADLESS = {self.headless}',
+                'REQUIRE_APPROVAL = True': f'REQUIRE_APPROVAL = {not self.auto_submit}'
+            }
+            self._update_script_config("a7_fill_form_resume.py", replacements)
+            
+            env_vars = {
+                "RESUME_FILE": str(self.resume_path.absolute())
+            }
+            
+            success = self._run_script(
+                "a7_fill_form_resume.py",
+                "Automated form filling and submission",
+                env_vars
+            )
+            self._restore_script_config("a7_fill_form_resume.py")
         
         return success
     
@@ -358,9 +437,11 @@ def main():
     """
     Hardcoded configuration - edit these values as needed:
     """
+    from output_config import RESUME_PATH
+    
     # ========== CONFIGURATION ==========
     job_url = "https://job-boards.greenhouse.io/hackerrank/jobs/7211528?gh_jid=7211528&gh_src=1836e8621us"
-    resume_path = "./data/Geetansh_resume.pdf"
+    resume_path = str(RESUME_PATH)  # Use centralized resume path
     headless_mode = True   # Set to False to see browser GUI
     auto_submit = False   # Set to True to auto-submit without confirmation
     # ===================================
