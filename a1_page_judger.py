@@ -22,6 +22,7 @@ import contextlib
 import json
 import os
 import re
+import sys
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -37,7 +38,12 @@ from utils import ci_match_label, normalize
 # =========================
 # HARD-CODED CONFIG (edit)
 # =========================
-START_URL = "https://job-boards.greenhouse.io/hackerrank/jobs/7211528?gh_jid=7211528&gh_src=1836e8621us"  # <-- put the landing/listing URL here
+# Get START_URL from environment variable (set by telegram_bot.py)
+START_URL = os.getenv("JOB_URL", "")
+if not START_URL:
+    print("❌ JOB_URL environment variable not set!")
+    sys.exit(1)
+
 HEADLESS = False                                   # True for headless browser
 SLOW_MO_MS = 300                                     # Slow-mo for debugging (0 for speed)
 GENERATE_COVER = True                                # Call your generator on the landing page

@@ -14,7 +14,7 @@ Outputs: form_fields_enhanced.json with complete field list
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from pathlib import Path
-import json, re, time, os
+import json, re, time, os, sys
 from dotenv import load_dotenv
 
 # Suppress Google API/GRPC warnings
@@ -28,8 +28,13 @@ from output_config import OutputPaths
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 load_dotenv()
+
 # Configuration - Read from environment variables for pipeline integration
-JOB_URL = os.getenv("JOB_URL", "https://job-boards.greenhouse.io/hackerrank/jobs/7211528?gh_jid=7211528&gh_src=1836e8621us")
+JOB_URL = os.getenv("JOB_URL", "")
+if not JOB_URL:
+    print("❌ JOB_URL environment variable not set!")
+    sys.exit(1)
+
 OUT_FILE = OutputPaths.FORM_FIELDS_ENHANCED
 MODEL_NAME = "gemini-2.5-flash-lite"
 

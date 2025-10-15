@@ -440,7 +440,13 @@ def main():
     from output_config import RESUME_PATH
     
     # ========== CONFIGURATION ==========
-    job_url = "https://job-boards.greenhouse.io/hackerrank/jobs/7211528?gh_jid=7211528&gh_src=1836e8621us"
+    # Get job URL from environment variable or use default for testing
+    job_url = os.getenv("JOB_URL", "")
+    if not job_url:
+        print("❌ JOB_URL environment variable not set!")
+        print("💡 Set it with: export JOB_URL='your-job-url'")
+        sys.exit(1)
+    
     resume_path = str(RESUME_PATH)  # Use centralized resume path
     headless_mode = True   # Set to False to see browser GUI
     auto_submit = False   # Set to True to auto-submit without confirmation

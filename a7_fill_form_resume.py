@@ -11,7 +11,8 @@ What's working:
   * scans for <input type="file"> on page & iframes
   * listens for file chooser (native dialog) and supplies the resume
   * retries opportunistically during the fill and right before submit
-- Keeps: slow typing for dropdowns, video recording, before/after screenshots with approval
+- Keeps: slow typing for dropdowns, before/after screenshots with approval
+- Video recording disabled
 
 Run:
   python a7_fill_form_resume.py                    # Normal mode with approval
@@ -35,7 +36,11 @@ from utils import ci_match_label, normalize
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
 # ========================= CONFIG =========================
-JOB_URL = "https://job-boards.greenhouse.io/hackerrank/jobs/7211528?gh_jid=7211528&gh_src=1836e8621us"
+# Get JOB_URL from environment variable (set by telegram_bot.py)
+JOB_URL = os.getenv("JOB_URL", "")
+if not JOB_URL:
+    logging.error("❌ JOB_URL environment variable not set!")
+    sys.exit(1)
 
 # SIMPLIFIED: Only use filled_answers.json (includes Gemini auto-fill + your Telegram inputs)
 ANSWERS_PATH = OutputPaths.FILLED_ANSWERS
@@ -64,7 +69,6 @@ if SKIP_SUBMIT:
 
 # Timing
 SLOW_MO_MS = 300
-RECORD_VIDEO_DIR = OutputPaths.VIDEOS_DIR
 SCREENSHOT_DIR = OutputPaths.SCREENSHOTS_DIR
 COMBO_OPEN_PAUSE_MS = 200
 COMBO_TYPE_DELAY_MS = 200
@@ -485,11 +489,9 @@ def main():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(channel="chrome", headless=HEADLESS, slow_mo=SLOW_MO_MS)
-        os.makedirs(RECORD_VIDEO_DIR, exist_ok=True)
+        # Video recording disabled
         context = browser.new_context(
             accept_downloads=True,
-            record_video_dir=RECORD_VIDEO_DIR,
-            record_video_size={"width": 1280, "height": 720},
         )
         page = context.new_page()
 

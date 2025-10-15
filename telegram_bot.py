@@ -45,8 +45,55 @@ TELEGRAM_QUESTIONS_FILE = OUTPUT_BASE / "telegram_questions.json"
 TELEGRAM_ANSWERS_FILE = OUTPUT_BASE / "telegram_answers.json"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Send me a job application link to begin the autofill process!")
+    await update.message.reply_text(
+        "👋 **Welcome to Job Application Autofill Bot!**\n\n"
+        "I can help you automatically fill job application forms.\n\n"
+        "📝 **How to use:**\n"
+        "1. Send me a job application link\n"
+        "2. I'll analyze the page and parse your resume\n"
+        "3. Review the generated cover letter\n"
+        "4. Answer any questions I can't fill automatically\n"
+        "5. Review all answers and make changes if needed\n"
+        "6. I'll fill and submit the form!\n\n"
+        "💡 Use /help for more details or just send a job link to start!"
+    )
     return WAITING_FOR_LINK
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📚 **Help & Usage Guide**\n\n"
+        "**Commands:**\n"
+        "• /start - Begin the application process\n"
+        "• /help - Show this help message\n"
+        "• /cancel - Cancel current operation\n\n"
+        "**How it works:**\n"
+        "1️⃣ Send a job application URL\n"
+        "2️⃣ Review AI-generated cover letter (approve/stop)\n"
+        "3️⃣ Answer questions for fields I couldn't fill\n"
+        "4️⃣ Review ALL answers (auto + yours)\n"
+        "5️⃣ Make changes using natural language:\n"
+        "   • 'question 2 to yes'\n"
+        "   • 'q2 to yes, q3 to no, q4 to maybe'\n"
+        "6️⃣ Approve and I'll auto-submit!\n\n"
+        "**Features:**\n"
+        "✅ AI resume parsing\n"
+        "✅ Auto cover letter generation (120-150 words)\n"
+        "✅ Smart form filling\n"
+        "✅ Multiple answer modifications at once\n"
+        "✅ Screenshot confirmations\n\n"
+        "Ready? Just send me a job link! 🚀"
+    )
+    return WAITING_FOR_LINK
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id in user_sessions:
+        del user_sessions[user_id]
+    await update.message.reply_text(
+        "❌ Operation cancelled.\n\n"
+        "Use /start to begin a new application."
+    )
+    return ConversationHandler.END
 
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from output_config import RESUME_PATH
@@ -735,6 +782,22 @@ async def send_outputs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # Set up bot commands menu (appears as button in chat)
+    async def post_init(application):
+        from telegram import BotCommand
+        await application.bot.set_my_commands([
+            BotCommand("start", "🚀 Start the bot and begin job application"),
+            BotCommand("help", "❓ Show help and usage instructions"),
+            BotCommand("cancel", "❌ Cancel current operation"),
+        ])
+    
+    app.post_init = post_init
+    
+    # Add help and cancel command handlers
+    app.add_handler(CommandHandler('help', help_command))
+    app.add_handler(CommandHandler('cancel', cancel_command))
+    
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
@@ -744,10 +807,14 @@ def main():
             WAITING_FOR_QA_APPROVAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_qa_approval)],
             # 🗑️ WAITING_FOR_SUBMIT_APPROVAL removed - auto-submit after Q&A approval
         },
-        fallbacks=[CommandHandler('start', start)]
+        fallbacks=[
+            CommandHandler('start', start),
+            CommandHandler('cancel', cancel_command)
+        ]
     )
     app.add_handler(conv_handler)
     print("🤖 Telegram bot running...")
+    print("💡 Bot commands menu has been set up!")
     app.run_polling()
 
 if __name__ == "__main__":
